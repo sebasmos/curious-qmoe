@@ -1,4 +1,4 @@
-import torch
+# SClassifier, reset_weightsimport torch
 from torch import nn
 import timm
 import torch.nn as nn

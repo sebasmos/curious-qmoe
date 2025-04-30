@@ -21,6 +21,25 @@
 - 📁 `notebooks/` – Visualizations and exploratory analyses
 - 📁 `scripts/` – End-to-end training, testing, and quantization pipelines
 
+QVE/
+├── data/                         # Data files and processed data
+│   ├── esc/                      # ESC dataset (raw/processed data)
+│   ├── urban8k/                  # Urban8K dataset (raw/processed data)
+│   └── data_processing.py        # Functions to load and preprocess datasets
+├── qve/                          # Main module (QVE)
+│   ├── model.py                  # Model definition
+│   ├── trainer.py                # PyTorch Lightning training loop
+│   ├── utils.py                  # Utility functions
+├── scripts/                      # Standalone scripts
+│   ├── run_training.py           # Start training process
+│   ├── cross_validation.py       # Run cross-validation with different datasets
+│   └── test.py                   # Testing the model
+├── configs/                      # Configuration files
+│   └── experiment_config.yaml    # Central config file (datasets, hyperparameters, training params)
+├── LICENSE                       # License
+├── README.md                     # Project documentation
+└── requirements.txt              # Dependencies
+
 ## Setting Up Your Environment
 
 1. **Create a Conda Environment:**
