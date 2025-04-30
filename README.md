@@ -1,90 +1,136 @@
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sebasmos/quantaudio/blob/main/LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/sebasmos/quantaudio)
 
-# QuantAudio: Optimized Pre-Trained Vector Embeddings for Resource-Efficient Audio Classification
+# QWave: Quantized Embeddings for Efficient Audio Classification
 
-> 🚧 This repository is under development.
+> 🚧 **This repository is under active development.**
 >
-> 📩 **Code and models will be made publicly available upon preprint upload or journal submission.**
+> 📄 Code and models will be released upon preprint upload or journal submission.
 
-- 📂 **GitHub Repository**: [quantaudio](https://github.com/sebasmos/quantaudio)
+---
 
-## Project Structure
+## 🔍 Overview
 
-- 📁 `data/` – Links and scripts to download UrbanSound8K, ESC-50, and other datasets
-- 📁 `src/`
-  - `preprocessing/` – Audio loading, Mel spectrogram generation
-  - `models/` – Embedding extractor, MLP classifier
-  - `quantization/` – Post-training quantization scripts
-  - `evaluation/` – Metrics and logging tools
-- 📁 `experiments/` – Configs and logs for reproducible experiments
-- 📁 `notebooks/` – Visualizations and exploratory analyses
-- 📁 `scripts/` – End-to-end training, testing, and quantization pipelines
+**QWave** provides an efficient and lightweight pipeline for soundscape classification based on quantized vector embeddings derived from pre-trained models. The framework supports ESC-50 and UrbanSound8K datasets and includes post-training quantization, cross-validation, and experiment tracking via Hydra.
 
-QVE/
-├── data/                         # Data files and processed data
-│   ├── esc/                      # ESC dataset (raw/processed data)
-│   ├── urban8k/                  # Urban8K dataset (raw/processed data)
-│   └── data_processing.py        # Functions to load and preprocess datasets
-├── qve/                          # Main module (QVE)
-│   ├── model.py                  # Model definition
-│   ├── trainer.py                # PyTorch Lightning training loop
-│   ├── utils.py                  # Utility functions
-├── scripts/                      # Standalone scripts
-│   ├── run_training.py           # Start training process
-│   ├── cross_validation.py       # Run cross-validation with different datasets
-│   └── test.py                   # Testing the model
-├── configs/                      # Configuration files
-│   └── experiment_config.yaml    # Central config file (datasets, hyperparameters, training params)
-├── LICENSE                       # License
-├── README.md                     # Project documentation
-└── requirements.txt              # Dependencies
+---
 
-## Setting Up Your Environment
+## 📁 Project Structure
 
-1. **Create a Conda Environment:**
-   ```bash
-   conda create -n quantaudio python=3.11 -y
-   conda activate quantaudio
-   ```
+```text
+QuantAudio/
+├── configs/                   # Hydra configs for training and experiment tracking
+│   └── configs.yaml           # Central configuration file
+├── QWave/                     # Core source code
+│   ├── datasets.py            # EmbeddingDataset class and quantization logic
+│   ├── models.py              # Simple MLP classifier definition
+│   ├── train_utils.py         # Training and logging utilities
+│   ├── memory.py              # Memory usage profiler
+│   └── utils.py               # Save, seeding, and metric helpers
+├── scripts/                   # Run scripts
+│   └── train_cv.py            # K-Fold cross-validation pipeline using Hydra
+├── outputs/                   # Auto-generated experiment results
+├── requirements.txt           # Python dependencies
+├── LICENSE
+└── README.md
 
-2. **Install Dependencies:**
-   ```bash
-   git clone https://github.com/sebasmos/quantaudio.git
-   cd quantaudio
-   pip install -r requirements.txt
-   ```
 
-## Running the Pipeline
 
-To train and evaluate the quantized MLP classifier:
-```bash
-python scripts/train.py --config configs/urban8k_base.yaml
-```
+⸻
 
-To apply post-training quantization:
-```bash
-python scripts/quantize.py --model-checkpoint checkpoints/best_model.pth
-```
+⚙️ Setup
 
-## Contributing to QuantAudio
+1. Create Environment
 
-We welcome community contributions! Fork the [QuantAudio repository](https://github.com/sebasmos/QuantAudio), make your improvements, and open a pull request. Contributors will be acknowledged in the release.
+conda create -n qwave python=3.11 -y
+conda activate qwave
 
-Feel free to report bugs, suggest features, or share your use cases.
+2. Install Requirements
 
-## License
+git clone https://github.com/sebasmos/QuantAudio.git
+cd QuantAudio
+pip install -r requirements.txt
 
-QuantAudio is **free** and **open source**, released under the [MIT License](https://github.com/sebasmos/QuantAudio/blob/main/LICENSE).
 
-## Citation
 
-```bibtex
-@software{Cajas2025_QuantAudio,
-  author = {Cajas Ord\'o\~nez, Sebasti\'an Andr\'es and Torres Torres, Luis Fernando and Bosch, Cristian and Lai, Yuan and Duran Paredes, Carlos Andr\'es and Celi, Leo Anthony and Simon Carbajo, Ricardo},
-  title = {QuantAudio: Optimized Pre-Trained Vector Embeddings for Resource-Efficient Audio Classification},
+⸻
+
+🚀 Run Cross-Validation
+
+You can run an experiment with:
+
+python train_cv.py experiment.cross_validation.n_splits=5 \
+                   experiment.model.batch_size=32 \
+                   experiment.metadata.tag=exp01
+
+✅ This will save logs and checkpoints in outputs/exp01/fold_*/.
+
+⸻
+
+🔍 Config Overview (configs.yaml)
+
+experiment:
+  datasets:
+    esc:
+      csv: "/absolute/path/to/esc-50.csv"
+
+  model:
+    batch_size: 32
+    hidden_sizes: [256, 128, 64]
+    learning_rate: 0.001
+
+  training:
+    epochs: 50
+    early_stopping:
+      patience: 10
+      delta: 0.01
+
+  cross_validation:
+    n_splits: 5
+    shuffle: true
+    random_seed: 42
+
+  logging:
+    log_interval: 50
+    save_checkpoint: true
+    resume: true
+
+  metadata:
+    tag: "exp01"
+    notes: "EfficientNet baseline on ESC-50"
+
+
+
+⸻
+
+📊 Features
+	•	✅ Embedding extraction from EfficientNet / CLIP ViT
+	•	✅ Post-training quantization
+	•	✅ Cross-validation with reproducible config
+	•	✅ Class-imbalance handling
+	•	✅ Memory profiling & metrics logging
+	•	✅ Hydra integration for flexible experiments
+
+⸻
+
+🤝 Contributing
+
+We welcome contributions! Fork the repository, make your improvements, and open a PR. Feature suggestions and bug reports are appreciated.
+
+⸻
+
+📄 License
+
+This project is licensed under the MIT License.
+
+⸻
+
+📚 Citation
+
+@software{Cajas2025_QWave,
+  author = {Sebastián Andrés Cajas Ordóñez and others},
+  title = {QWave: Quantized Embeddings for Efficient Audio Classification},
   year = {2025},
   url = {https://github.com/sebasmos/QuantAudio},
   license = {MIT}
 }
-```
