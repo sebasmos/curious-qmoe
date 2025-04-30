@@ -33,42 +33,46 @@ QuantAudio/
 ├── requirements.txt           # Python dependencies
 ├── LICENSE
 └── README.md
+```
 
+---
 
+## ⚙️ Setup
 
-⸻
+### 1. Create Environment
 
-⚙️ Setup
-
-1. Create Environment
-
+```bash
 conda create -n qwave python=3.11 -y
 conda activate qwave
+```
 
-2. Install Requirements
+### 2. Install Requirements
 
+```bash
 git clone https://github.com/sebasmos/QuantAudio.git
 cd QuantAudio
 pip install -r requirements.txt
+```
 
+---
 
-
-⸻
-
-🚀 Run Cross-Validation
+## 🚀 Run Cross-Validation
 
 You can run an experiment with:
 
+```bash
 python train_cv.py experiment.cross_validation.n_splits=5 \
                    experiment.model.batch_size=32 \
                    experiment.metadata.tag=exp01
+```
 
-✅ This will save logs and checkpoints in outputs/exp01/fold_*/.
+> ✅ This will save logs and checkpoints in `outputs/exp01/fold_*/`.
 
-⸻
+---
 
-🔍 Config Overview (configs.yaml)
+## 🔍 Config Overview (`configs.yaml`)
 
+```yaml
 experiment:
   datasets:
     esc:
@@ -98,35 +102,36 @@ experiment:
   metadata:
     tag: "exp01"
     notes: "EfficientNet baseline on ESC-50"
+```
 
+---
 
+## 📊 Features
 
-⸻
+- ✅ **Embedding extraction from EfficientNet / CLIP ViT**
+- ✅ **Post-training quantization**
+- ✅ **Cross-validation with reproducible config**
+- ✅ **Class-imbalance handling**
+- ✅ **Memory profiling & metrics logging**
+- ✅ **Hydra integration for flexible experiments**
 
-📊 Features
-	•	✅ Embedding extraction from EfficientNet / CLIP ViT
-	•	✅ Post-training quantization
-	•	✅ Cross-validation with reproducible config
-	•	✅ Class-imbalance handling
-	•	✅ Memory profiling & metrics logging
-	•	✅ Hydra integration for flexible experiments
+---
 
-⸻
+## 🤝 Contributing
 
-🤝 Contributing
+We welcome contributions! Fork the [repository](https://github.com/sebasmos/QuantAudio), make your improvements, and open a PR. Feature suggestions and bug reports are appreciated.
 
-We welcome contributions! Fork the repository, make your improvements, and open a PR. Feature suggestions and bug reports are appreciated.
+---
 
-⸻
+## 📄 License
 
-📄 License
+This project is licensed under the [MIT License](https://github.com/sebasmos/QuantAudio/blob/main/LICENSE).
 
-This project is licensed under the MIT License.
+---
 
-⸻
+## 📙 Citation
 
-📚 Citation
-
+```bibtex
 @software{Cajas2025_QWave,
   author = {Sebastián Andrés Cajas Ordóñez and others},
   title = {QWave: Quantized Embeddings for Efficient Audio Classification},
@@ -134,3 +139,5 @@ This project is licensed under the MIT License.
   url = {https://github.com/sebasmos/QuantAudio},
   license = {MIT}
 }
+```
+
