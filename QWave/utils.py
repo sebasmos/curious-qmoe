@@ -137,3 +137,21 @@ def consolidate_and_average_metrics(args, output_folder):
         print(filtered_metrics)
     else:
         print("No metrics were found for any seed. Cannot calculate average metrics.")
+
+def get_device(cfg):
+    preferred = cfg.experiment.get("device", "auto").lower()
+    if preferred == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+    elif preferred == "mps" and torch.backends.mps.is_available():
+        return torch.device("mps")
+    elif preferred == "cpu":
+        return torch.device("cpu")
+    elif preferred == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+    else:
+        raise ValueError(f"Unknown device option: {preferred}")

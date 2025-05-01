@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-K-Fold CV on embedding CSVs using Hydra and flat config
+K-Fold CV on embedding CSVs
 """
 import os, json, warnings
 import hydra
@@ -11,10 +11,10 @@ import torch
 from sklearn.model_selection import StratifiedKFold
 
 from QWave.datasets import EmbeddingDataset
-from QWave.models import SClassifier, reset_weights
-from QWave.train_utils import train_pytorch, plot_losses
-from QWave.memory import get_memory_usage
-
+from QWave.models import SClassifier, reset_weights, ESCModel
+from QWave.train_utils import train_pytorch_local
+from QWave.graphics import plot_multiclass_roc_curve, plot_losses
+from QWave.utils import get_device 
 def run_cv(csv_path: str, cfg: DictConfig):
     df_full = pd.read_csv(csv_path)
     labels = df_full["class_id"].values
@@ -33,11 +33,15 @@ def run_cv(csv_path: str, cfg: DictConfig):
     out_dir = os.path.abspath(os.path.join("outputs", tag))
     os.makedirs(out_dir, exist_ok=True)
 
+    # Select device once
+    device = get_device(cfg)
+    print(f"Using device: {device}")
+
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
         print(f"\n--- FOLD {fold+1}/{skf.n_splits} ---")
 
         df_train = df.iloc[train_idx].reset_index(drop=True)
-        df_val   = df.iloc[val_idx].reset_index(drop=True)
+        df_val = df.iloc[val_idx].reset_index(drop=True)
 
         tr_ds = EmbeddingDataset(df_train)
         va_ds = EmbeddingDataset(df_val)
@@ -45,11 +49,16 @@ def run_cv(csv_path: str, cfg: DictConfig):
         tr_ld = torch.utils.data.DataLoader(tr_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
         va_ld = torch.utils.data.DataLoader(va_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
-        class_weights = torch.tensor(1.0 / np.bincount(tr_ds.labels.numpy()), dtype=torch.float32)
+        class_weights = torch.tensor(1.0 / np.bincount(tr_ds.labels.numpy()), dtype=torch.float32).to(device)
         in_dim = tr_ds.features.shape[1]
         num_classes = len(np.unique(labels))
 
-        model = SClassifier(in_dim, num_classes, hidden_sizes=cfg.experiment.model.hidden_sizes)
+        model = ESCModel(
+            in_dim,
+            num_classes,
+            hidden_sizes=cfg.experiment.model.hidden_sizes,
+            dropout_prob=cfg.experiment.model.dropout_prob
+        ).to(device)
         model.apply(reset_weights)
 
         fold_dir = os.path.join(out_dir, f"fold_{fold}")
@@ -58,26 +67,27 @@ def run_cv(csv_path: str, cfg: DictConfig):
         ckpt_path = os.path.join(fold_dir, "best_model.pth")
         resume = cfg.experiment.logging.resume and os.path.exists(ckpt_path)
 
-        model, tr_loss, va_loss, best_f1 = train_pytorch(
+        model, train_losses, val_losses, best_f1, all_labels, all_preds, all_probs = train_pytorch_local(
             args=cfg.experiment,
             model=model,
             train_loader=tr_ld,
             val_loader=va_ld,
             class_weights=class_weights,
             num_columns=in_dim,
-            device="cpu",
-            seed_dir=fold_dir,
+            device=device,
+            fold_folder=fold_dir,
             resume_checkpoint=resume,
             checkpoint_path=ckpt_path
         )
 
-        plot_losses(tr_loss, va_loss, fold_dir)
+        plot_multiclass_roc_curve(all_labels, all_probs, EXPERIMENT_NAME=fold_dir)
+        plot_losses(train_losses, val_losses, fold_dir)
         fold_metrics.append(dict(best_f1=best_f1))
 
         with open(os.path.join(fold_dir, "metrics.json"), "w") as f:
             json.dump({
-                "train_losses": tr_loss,
-                "val_losses": va_loss,
+                "train_losses": train_losses,
+                "val_losses": val_losses,
                 "best_f1": best_f1
             }, f, indent=4)
 

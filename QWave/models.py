@@ -3,6 +3,44 @@ from torch import nn
 import timm
 import torch.nn as nn
 
+
+
+
+class ESCModel(nn.Module):
+    def __init__(self, input_size, output_size, hidden_sizes=[128, 64], dropout_prob=0.3, activation_fn=nn.ReLU, use_residual=True):
+        super(ESCModel, self).__init__()
+        self.use_residual = use_residual
+        self.fc_layers = self._create_fc_layers(input_size, hidden_sizes, dropout_prob, activation_fn)
+        self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
+        self.activation_fn = activation_fn()
+        self.softmax = nn.LogSoftmax(dim=1)
+
+    def _create_fc_layers(self, input_size, hidden_sizes, dropout_prob, activation_fn):
+        layers = []
+        prev_size = input_size
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(prev_size, hidden_size))
+            layers.append(nn.LayerNorm(hidden_size))  
+            layers.append(activation_fn())
+            layers.append(nn.Dropout(p=dropout_prob))
+            prev_size = hidden_size
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        residual = x
+        x = self.fc_layers(x)
+        if self.use_residual and residual.shape == x.shape:
+            x += residual 
+        x = self.output_layer(x)
+        x = self.softmax(x)
+        return x
+
+def reset_weights(m):
+    for layer in m.children():
+        if hasattr(layer, 'reset_parameters'):
+            layer.reset_parameters()
+
+
 def count_parameters(model, message=""):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
