@@ -9,15 +9,16 @@ hydra:
   output_subdir: null
 
 experiment:
-  device: "mps"  # or "cuda", "mps", or "cpu"
+  device: "cuda"  # or "cuda", "mps", or "cpu"
   datasets:
     esc:
-      csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
-      imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
-  
+      # csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      # imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
+      csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      imgs: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
 
   model:
-    batch_size: 256
+    batch_size: 64
     hidden_sizes: [640, 320]
     learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243

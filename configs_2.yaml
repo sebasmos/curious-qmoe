@@ -1,0 +1,82 @@
+# config.yaml
+
+defaults:
+  - _self_
+  # If using timm's create_optimizer/scheduler helpers, their default args might need mapping
+  # Or structure the config exactly as they expect. Example uses direct mapping for simplicity.
+
+data:
+  image_root: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
+  input_size: 224             # GFNet default
+  batch_size: 64
+  num_workers: 4
+  pin_mem: True
+  # Optional augmentations matching get_transforms
+  random_horiz_flip: 0.5
+  jitter: 0.4 # Color jitter amount
+
+model:
+  arch: 'gfnet-h-ti'           # Or 'gfnet-h-s' etc.
+  drop_path: 0.1
+  finetune: /home/sebastian/codes/repo_clean/QWave/gfnet-h-ti.pth # Optional: Path to pretrained weights (.pth file or dir)
+  # --- Optional ALOFT/Noise params ---
+  # noise_mode: 0              # 0: off, 1: add noise
+  # perturb_prob: 0.5
+  # mask_radio: 0.5
+  # mask_alpha: 0.2
+  # uncertainty_model: 2       # 1: batch+mean, 2: batch+element
+  # uncertainty_factor: 1.0
+  # gauss_or_uniform: 0        # 0: gaussian, 1: uniform, 2: random
+  # noise_layers: [0, 1, 2, 3]
+
+optimizer:
+  opt: adamw
+  lr: 0.0005                 # Base LR (GFNet script might scale this - check create_optimizer behavior)
+  weight_decay: 0.05
+  momentum: 0.9              # Used if opt='sgd'
+  betas: [0.9, 0.999]        # AdamW default
+  eps: 1.0e-8
+  clip_grad: 1.0             # Max grad norm
+
+scheduler:
+  sched: cosine
+  epochs: 50                 # Total epochs for scheduler (will be used per fold)
+  # min_lr: 1.0e-5           # Use timm defaults or specify
+  # warmup_lr: 1.0e-6
+  warmup_epochs: 5
+  # cooldown_epochs: 10
+  decay_rate: 0.1            # Used for step schedulers
+  # decay_epochs: 30           # Used for step schedulers
+
+training:
+  epochs: 50                 # Total epochs per fold
+  smoothing: 0.1             # Label smoothing (if mixup is off)
+  # --- Mixup/Cutmix ---
+  mixup: 0.0                 # Alpha for mixup (0 to disable)
+  cutmix: 0.0                # Alpha for cutmix (0 to disable)
+  cutmix_minmax: null        # Min/max ratio for cutmix
+  mixup_prob: 1.0            # Prob of applying mixup/cutmix if enabled
+  mixup_switch_prob: 0.5     # Prob of switching mixup to cutmix if both enabled
+  mixup_mode: 'batch'        # 'batch', 'pair', 'elem'
+  # --- EMA ---
+  model_ema: False #True           # Enable Model Exponential Moving Average
+  model_ema_decay: 0.99996
+  model_ema_force_cpu: False
+  # --- AMP ---
+  amp: True                  # Use Automatic Mixed Precision
+  # --- Other ---
+  resume: False              # Try to resume from checkpoint_last.pth in fold dir
+  set_training_mode: True    # Keep model in train() mode during training
+
+experiment:
+  metadata:
+    tag: "gfnet_esc50_cv"     # Experiment tag
+  cross_validation:
+    n_splits: 5
+    shuffle: True
+    random_seed: 42
+  # Add device selection (e.g., 'cuda', 'cuda:0', 'cpu')
+  device: 'cuda'
+
+# Add other necessary configs if utils.py or engine.py rely on them
+

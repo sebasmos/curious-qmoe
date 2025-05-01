@@ -122,6 +122,13 @@ def run_cv(image_root: str, cfg: DictConfig):
         os.makedirs(fold_dir, exist_ok=True)
         ckpt_path = os.path.join(fold_dir, "best_model.pth")
         resume = cfg.experiment.logging.resume and os.path.exists(ckpt_path)
+        if resume:
+            try:
+                model.load_state_dict(torch.load(ckpt_path, map_location=device))
+                print(f"Resumed from checkpoint: {ckpt_path}")
+            except RuntimeError as e:
+                print(f"⚠️  Checkpoint load failed: {e}\n→ Starting from scratch.")
+                resume = False
 
         model, train_losses, val_losses, best_f1, all_labels, all_preds, all_probs = train_pytorch_local(
             args=cfg.experiment,
@@ -139,7 +146,8 @@ def run_cv(image_root: str, cfg: DictConfig):
         plot_multiclass_roc_curve(all_labels, all_probs, EXPERIMENT_NAME=fold_dir)
         plot_losses(train_losses, val_losses, fold_dir)
         fold_metrics.append(dict(best_f1=best_f1))
-
+        print(f"Best F1: {best_f1:.4f}")
+        print(f"Saving metrics to {fold_dir}/metrics.json")
         with open(os.path.join(fold_dir, "metrics.json"), "w") as f:
             json.dump({
                 "train_losses": train_losses,
@@ -153,6 +161,8 @@ def run_cv(image_root: str, cfg: DictConfig):
         "metadata": dict(cfg.experiment.metadata),
         "folds": fold_metrics
     }
+    print(f"Saving summary to {out_dir}/summary.json")
+    print(summary)
 
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=4)
