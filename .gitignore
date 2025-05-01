@@ -8,8 +8,8 @@ EXPERIMENTS/
 #**/*.txt
 outputs/
 models/
-**/*.yaml
-*.yaml
+#**/*.yaml
+#*.yaml
 **/*.jpg
 *.zip
 **/*.zip/
