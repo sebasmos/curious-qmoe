@@ -4,8 +4,6 @@ import timm
 import torch.nn as nn
 
 
-
-
 class ESCModel(nn.Module):
     def __init__(self, input_size, output_size, hidden_sizes=[128, 64], dropout_prob=0.3, activation_fn=nn.ReLU, use_residual=True):
         super(ESCModel, self).__init__()

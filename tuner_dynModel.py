@@ -1,51 +1,43 @@
 #!/usr/bin/env python
 """
-Optuna-integrated K-Fold CV for tuning ESC audio classifier
+Optuna-integrated K-Fold CV for tuning ESC audio classifier with dynamic MLP architecture search
 """
 import os, json, warnings
 import hydra
 import optuna
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.model_selection import StratifiedKFold
-
+from torch import nn
 from QWave.datasets import EmbeddingDataset
 from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 
-from torch import nn
 
+def build_dynamic_mlp(input_size, output_size, trial):
+    num_layers = trial.suggest_int("num_layers", 2, 6)
+    activation_name = trial.suggest_categorical("activation", ["ReLU", "GELU", "ELU"])
+    activation_cls = getattr(nn, activation_name)
+    dropout_prob = trial.suggest_float("dropout_prob", 0.0, 0.5)
+    use_layernorm = trial.suggest_categorical("use_layernorm", [True, False])
 
-class ESCModel(nn.Module):
-    def __init__(self, input_size, output_size, hidden_sizes=[128, 64], dropout_prob=0.3, activation_fn=nn.ReLU, use_residual=True):
-        super(ESCModel, self).__init__()
-        self.use_residual = use_residual
-        self.fc_layers = self._create_fc_layers(input_size, hidden_sizes, dropout_prob, activation_fn)
-        self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
-        self.activation_fn = activation_fn()
-        self.softmax = nn.LogSoftmax(dim=1)
+    layers = []
+    in_dim = input_size
 
-    def _create_fc_layers(self, input_size, hidden_sizes, dropout_prob, activation_fn):
-        layers = []
-        prev_size = input_size
-        for hidden_size in hidden_sizes:
-            layers.append(nn.Linear(prev_size, hidden_size))
-            layers.append(nn.LayerNorm(hidden_size))  
-            layers.append(activation_fn())
-            layers.append(nn.Dropout(p=dropout_prob))
-            prev_size = hidden_size
-        return nn.Sequential(*layers)
+    for i in range(num_layers):
+        out_dim = trial.suggest_int(f"hidden_dim_{i}", 64, 1024, step=64)
+        layers.append(nn.Linear(in_dim, out_dim))
+        if use_layernorm:
+            layers.append(nn.LayerNorm(out_dim))
+        layers.append(activation_cls())
+        layers.append(nn.Dropout(dropout_prob))
+        in_dim = out_dim
 
-    def forward(self, x):
-        residual = x
-        x = self.fc_layers(x)
-        if self.use_residual and residual.shape == x.shape:
-            x += residual 
-        x = self.output_layer(x)
-        x = self.softmax(x)
-        return x
+    layers.append(nn.Linear(in_dim, output_size))
+    layers.append(nn.LogSoftmax(dim=1))
+    return nn.Sequential(*layers)
 
 
 def reset_weights(m):
@@ -55,6 +47,8 @@ def reset_weights(m):
 
 
 def objective(trial, base_cfg, csv_path):
+    OmegaConf.set_struct(base_cfg, False)
+
     base_cfg.experiment.model.learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
     base_cfg.experiment.model.weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     base_cfg.experiment.model.label_smoothing = trial.suggest_float("label_smoothing", 0.0, 0.2)
@@ -63,11 +57,6 @@ def objective(trial, base_cfg, csv_path):
     base_cfg.experiment.model.epochs = trial.suggest_int("epochs", 50, 150)
     base_cfg.experiment.model.patience = trial.suggest_int("patience", 5, 20)
     base_cfg.experiment.model.factor = trial.suggest_float("factor", 0.5, 0.9)
-    base_cfg.experiment.model.hidden_sizes = [
-        trial.suggest_int("hidden_size1", 256, 1024, step=128),
-        trial.suggest_int("hidden_size2", 128, 512, step=64),
-        trial.suggest_int("hidden_size3", 64, 256, step=32),
-    ]
     base_cfg.experiment.metadata.tag = f"optuna_trial_{trial.number}"
     base_cfg.experiment.logging.resume = False
 
@@ -96,11 +85,7 @@ def objective(trial, base_cfg, csv_path):
         in_dim = tr_ds.features.shape[1]
         num_classes = len(np.unique(labels))
 
-        model = ESCModel(
-            in_dim, num_classes,
-            hidden_sizes=base_cfg.experiment.model.hidden_sizes,
-            dropout_prob=base_cfg.experiment.model.dropout_prob
-        )
+        model = build_dynamic_mlp(in_dim, num_classes, trial)
         model.apply(reset_weights)
 
         model, _, _, best_f1, _, _, _ = train_pytorch_local(
@@ -128,11 +113,13 @@ def main(cfg: DictConfig):
         raise FileNotFoundError(csv_path)
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(lambda trial: objective(trial, cfg, csv_path), n_trials=200)
+    study.optimize(lambda trial: objective(trial, cfg, csv_path), n_trials=100)
 
-    print("Best trial:")
-    print(study.best_trial.value)
-    print(study.best_trial.params)
+    print("\nBest trial:")
+    print(f"  F1 Score: {study.best_trial.value:.4f}")
+    print("  Architecture and hyperparameters:")
+    for k, v in study.best_trial.params.items():
+        print(f"    {k}: {v}")
 
 
 if __name__ == "__main__":
