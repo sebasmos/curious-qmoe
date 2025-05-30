@@ -9,13 +9,13 @@ hydra:
   output_subdir: null
 
 experiment:
-  device: "cuda"  # or "cuda", "mps", or "cpu"
+  device: "mps"  # or "cuda", "mps", or "cpu"
   datasets:
     esc:
-      # csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
-      # imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
-      csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
-      imgs: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
+      csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
+      # csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      # imgs: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
 
   model:
     batch_size: 64
@@ -31,7 +31,6 @@ experiment:
     patience: 15
     factor: 0.6156433661410728
 
-
   cross_validation:
     n_splits: 5
     shuffle: true
@@ -44,4 +43,4 @@ experiment:
 
   metadata:
     tag: "EfficientNet_esc50_imgs_1536"
-    notes: "EfficientNet baseline on ESC-50"
+    notes: ""

@@ -49,24 +49,25 @@ conda activate qwave
 ### 2. Install Requirements
 
 ```bash
-git clone https://github.com/sebasmos/QuantAudio.git
-cd QuantAudio
+git clone https://github.com/sebasmos/qwave.git
+cd qwave
 pip install -r requirements.txt
 ```
 
 ---
 
-## 🚀 Run Cross-Validation
+## 🚀 Run Cross-Validation For Vector Embeddings Framework
 
 You can run an experiment with:
 
 ```bash
-python train_cv.py experiment.cross_validation.n_splits=5 \
+python run_trainer.py experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+                   experiment.cross_validation.n_splits=5 \
                    experiment.model.batch_size=32 \
-                   experiment.metadata.tag=exp01
+                   experiment.metadata.tag=experiment_name \
 ```
 
-> ✅ This will save logs and checkpoints in `outputs/exp01/fold_*/`.
+> ✅ This will save logs and checkpoints in `outputs/experiment_name/fold_*/`.
 
 ---
 
