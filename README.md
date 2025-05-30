@@ -61,8 +61,21 @@ pip install -r requirements.txt
 You can run an experiment with:
 
 ```bash
+
+python your_script.py experiment.metadata.tag=EfficientNet_esc50_imgs_1536 \
+                        experiment.model.batch_size=64 \
+                        experiment.model.epochs=100 \
+                        experiment.device=cuda \
+                        experiment.datasets.esc.csv=/path/to/your.csv \
+                        experiment.datasets.esc.imgs=/path/to/your/images
+```
+
+For example: 
+
+```bash
 python run_trainer.py experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
                    experiment.cross_validation.n_splits=5 \
+                   experiment.device=mps
                    experiment.model.batch_size=32 \
                    experiment.metadata.tag=experiment_name \
 ```
