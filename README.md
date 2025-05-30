@@ -49,9 +49,11 @@ conda activate qwave
 ### 2. Install Requirements
 
 ```bash
+
+
 git clone https://github.com/sebasmos/qwave.git
 cd qwave
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ---
@@ -62,7 +64,7 @@ You can run an experiment with:
 
 ```bash
 
-python your_script.py experiment.metadata.tag=EfficientNet_esc50_imgs_1536 \
+python run_trainer.py experiment.metadata.tag=EfficientNet_esc50_imgs_1536 \
                         experiment.model.batch_size=64 \
                         experiment.model.epochs=100 \
                         experiment.device=cuda \

@@ -15,6 +15,7 @@ from QWave.models import SClassifier, reset_weights, ESCModel
 from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.utils import get_device 
+
 def run_cv(csv_path: str, cfg: DictConfig):
     df_full = pd.read_csv(csv_path)
     labels = df_full["class_id"].values
