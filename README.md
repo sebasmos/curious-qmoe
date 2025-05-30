@@ -121,11 +121,11 @@ experiment:
 
 To add a new dataset configuration:
 
-1. **Create a new YAML file** inside the `config/` folder. For example:
+**Create a new YAML file** inside the `config/` folder. For example:
 
 config/urbansound.yaml
 
-2. **Define the structure** like this:
+**Define the structure** like this:
 
 ```yaml
 defaults:
@@ -168,12 +168,12 @@ experiment:
     notes: UrbanSound8K experiment
 ```
 
-	3.	Run it using:
+Run it using:
 
 `python run_trainer.py --config-name=urbansound`
 
 
-	4.	(Optional) Override fields at runtime:
+(Optional) Override fields at runtime:
 
 ```
 python run_trainer.py --config-name=urbansound \
