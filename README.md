@@ -63,23 +63,17 @@ pip install -e .
 You can run an experiment with:
 
 ```bash
-
-python run_trainer.py experiment.metadata.tag=EfficientNet_esc50_imgs_1536 \
-                        experiment.model.batch_size=64 \
-                        experiment.model.epochs=100 \
-                        experiment.device=cuda \
-                        experiment.datasets.esc.csv=/path/to/your.csv \
-                        experiment.datasets.esc.imgs=/path/to/your/images
+python run_trainer.py --config-name=esc50 \
+  experiment.datasets.esc.csv=path_to_embeddings_csv \
+  experiment.device=cpu \
 ```
 
 For example: 
 
 ```bash
-python run_trainer.py experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-                   experiment.cross_validation.n_splits=5 \
-                   experiment.device=mps
-                   experiment.model.batch_size=32 \
-                   experiment.metadata.tag=experiment_name \
+python run_trainer.py --config-name=esc50 \
+  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+  experiment.device=cuda \
 ```
 
 > ✅ This will save logs and checkpoints in `outputs/experiment_name/fold_*/`.
@@ -121,6 +115,73 @@ experiment:
 ```
 
 ---
+Sure! Here’s the section starting only from “Add a New Dataset”, ready to be copied into your documentation or README.md:
+
+⸻
+
+## ➕ Add a New Dataset
+
+To add a new dataset configuration:
+
+1. **Create a new YAML file** inside the `config/` folder. For example:
+
+config/urbansound.yaml
+
+2. **Define the structure** like this:
+
+```yaml
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+hydra:
+  run:
+    dir: ./outputs/${experiment.metadata.tag}
+  output_subdir: null
+
+experiment:
+  device: cuda
+  datasets:
+    csv: /absolute/path/to/urbansound.csv
+    imgs: /absolute/path/to/urbansound/images
+  model:
+    batch_size: 64
+    hidden_sizes: [512, 256]
+    learning_rate: 0.001
+    dropout_prob: 0.3
+    epochs: 100
+    early_stopping:
+      patience: 10
+      delta: 0.01
+    weight_decay: 0.001
+    label_smoothing: 0.0
+    patience: 10
+    factor: 0.5
+  cross_validation:
+    n_splits: 5
+    shuffle: true
+    random_seed: 42
+  logging:
+    log_interval: 50
+    save_checkpoint: true
+    resume: true
+  metadata:
+    tag: urbansound_run
+    notes: UrbanSound8K experiment
+
+	3.	Run it using:
+
+python run_trainer.py --config-name=urbansound
+
+
+	4.	(Optional) Override fields at runtime:
+
+python run_trainer.py --config-name=urbansound \
+  experiment.datasets.csv=/custom/path/urbansound.csv \
+  experiment.metadata.tag=my_custom_tag
+
+--- 
+
 
 ## 📊 Features
 

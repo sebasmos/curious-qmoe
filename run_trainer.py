@@ -105,7 +105,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
     print(json.dumps(summary, indent=4))
 
 
-@hydra.main(version_base=None, config_path=".", config_name="configs")
+# @hydra.main(version_base=None, config_path=".", config_name="configs")
+@hydra.main(version_base=None, config_path="config", config_name="esc50")
 def main(cfg: DictConfig):
     for name, meta in cfg.experiment.datasets.items():
         csv_path = meta.csv
