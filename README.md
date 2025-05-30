@@ -115,9 +115,7 @@ experiment:
 ```
 
 ---
-Sure! Here’s the section starting only from “Add a New Dataset”, ready to be copied into your documentation or README.md:
 
-⸻
 
 ## ➕ Add a New Dataset
 
@@ -168,17 +166,20 @@ experiment:
   metadata:
     tag: urbansound_run
     notes: UrbanSound8K experiment
+```
 
 	3.	Run it using:
 
-python run_trainer.py --config-name=urbansound
+`python run_trainer.py --config-name=urbansound`
 
 
 	4.	(Optional) Override fields at runtime:
 
+```
 python run_trainer.py --config-name=urbansound \
   experiment.datasets.csv=/custom/path/urbansound.csv \
   experiment.metadata.tag=my_custom_tag
+```
 
 --- 
 
