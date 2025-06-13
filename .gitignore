@@ -1,13 +1,9 @@
 outputs
 __pycache__/
-#data/
-EXPERIMENTS/
 *.csv
 **/*.csv
 *.zip
 #**/*.txt
-outputs/
-models/
 #**/*.yaml
 #*.yaml
 **/*.jpg
@@ -45,8 +41,6 @@ models/
 data
 *.ipynb_checkpoints
 **/*.ipynb_checkpoints
-/EXPERIMENTS
-figures/
 *.out
 **/*.pyc
 *.pyc
@@ -64,4 +58,3 @@ figures/
 *.tfrecord
 #**/.csv
 #*.csv
-qve.egg-info
