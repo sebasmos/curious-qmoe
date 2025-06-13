@@ -1,6 +1,6 @@
 outputs
 __pycache__/
-data/
+#data/
 EXPERIMENTS/
 *.csv
 **/*.csv
