@@ -191,10 +191,9 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
 
     
     cc_keys = [
-        "timestamp","project_name", "duration","emissions",
+        "project_name", "duration","emissions",
         "emissions_rate","cpu_power","gpu_power","ram_power","cpu_energy","gpu_energy",
-        "ram_energy","energy_consumed", "python_version",
-        "cpu_count","cpu_model","gpu_count","gpu_model",
+        "ram_energy","energy_consumed", "cpu_count","cpu_model","gpu_count","gpu_model",
         "ram_total_size"
     ]
 
