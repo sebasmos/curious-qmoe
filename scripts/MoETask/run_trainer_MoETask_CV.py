@@ -14,12 +14,11 @@ Key points
 * **Outputs** – each fold gets its own directory, ROC plot, and `metrics.json`.
 * **Summary** – aggregated weighted-F1 across folds saved to `summary.json`.
 
-python run_trainer_MoETask.py  --config-name=esc50 \
+python run_trainer_MoETask_CV.py  --config-name=esc50 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
   experiment.metadata.tag="EfficientNet_esc50MoEDataCV"
 """
-
 from pathlib import Path
 import os, sys
 ROOT = Path(__file__).resolve().parents[2]
@@ -232,10 +231,11 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
 
     for k in all_train_emissions_data:
         if all_train_emissions_data[k]:
-            if isinstance(all_train_emissions_data[k][0], (int, float)):
+            if all_train_emissions_data[k] and all(isinstance(val, (int, float)) for val in all_train_emissions_data[k]):
                 summary[f"train_{k}_mean"] = float(np.mean(all_train_emissions_data[k]))
                 summary[f"train_{k}_std"] = float(np.std(all_train_emissions_data[k]))
             else:
+                # Handle non-numeric values (e.g., timestamp, project_name, python_version, cpu_model, gpu_model)
                 unique_values = list(set(all_train_emissions_data[k]))
                 if len(unique_values) == 1:
                     summary[f"train_{k}_common"] = unique_values[0]
@@ -244,10 +244,11 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
 
     for k in all_val_emissions_data:
         if all_val_emissions_data[k]:
-            if isinstance(all_val_emissions_data[k][0], (int, float)):
+            if all_val_emissions_data[k] and all(isinstance(val, (int, float)) for val in all_val_emissions_data[k]):
                 summary[f"val_{k}_mean"] = float(np.mean(all_val_emissions_data[k]))
                 summary[f"val_{k}_std"] = float(np.std(all_val_emissions_data[k]))
             else:
+                # Handle non-numeric values
                 unique_values = list(set(all_val_emissions_data[k]))
                 if len(unique_values) == 1:
                     summary[f"val_{k}_common"] = unique_values[0]
