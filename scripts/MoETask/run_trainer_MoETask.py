@@ -14,13 +14,18 @@ Key points
 * **Outputs** – each fold gets its own directory, ROC plot, and `metrics.json`.
 * **Summary** – aggregated weighted-F1 across folds saved to `summary.json`.
 
-
-python run_trainer_MoETask.py  --config-name=esc50 \
+python run_trainer_MoETask.py \
+  --config-path /Users/sebasmos/Desktop/QWave/config \
+  --config-name esc50 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
-  experiment.metadata.tag="EfficientNet_esc50MoEDataCV"
-
+  experiment.metadata.tag=  experiment.metadata.tag="EfficientNet_esc50MoEDataCV"
 """
+
+from pathlib import Path, os, sys         
+ROOT = Path(__file__).resolve().parents[2] 
+os.chdir(ROOT)                             
+sys.path.insert(0, str(ROOT))              
 
 import os, json, warnings
 import hydra
@@ -39,9 +44,6 @@ from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.utils import get_device
 
-#######################################################################################
-# Router                                                                              #
-#######################################################################################
 
 class Router(nn.Module):
     """Simple linear router: logits = W·p_expert."""

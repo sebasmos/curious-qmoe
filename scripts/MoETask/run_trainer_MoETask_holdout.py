@@ -12,13 +12,18 @@ Training the Router with **BCE-with-Logits loss on one-hot targets**
 
 All other behaviour (per-class experts, single hold-out split, ROC plot) is unchanged.
 
-python run_trainer_MoETask_holdout.py  --config-name=esc50 \
+python run_trainer_MoETask_holdout.py \
+  --config-path /Users/sebasmos/Desktop/QWave/config \
+  --config-name esc50 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
-  experiment.metadata.tag="EfficientNet_esc50MoEData"
-
+  experiment.metadata.tag=EfficientNet_esc50MoEData
 """
-
+# Ensure qwave is in the path
+from pathlib import Path, os, sys         
+ROOT = Path(__file__).resolve().parents[2] 
+os.chdir(ROOT)                             
+sys.path.insert(0, str(ROOT))              
 import os, json, warnings, sys
 from typing import List
 
@@ -38,10 +43,6 @@ from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve
 from QWave.utils import get_device
 
-#######################################################################################
-# Router                                                                              #
-#######################################################################################
-
 class Router(nn.Module):
     """Linear layer → logits (no softmax)."""
     def __init__(self, num_experts: int):
@@ -52,10 +53,6 @@ class Router(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc(x)  # raw logits per class
-
-#######################################################################################
-# Helpers                                                                             #
-#######################################################################################
 
 def _pos_prob(model: nn.Module, loader: DataLoader, device: torch.device) -> torch.Tensor:
     model.eval()
@@ -91,9 +88,6 @@ def _train_router(router: Router, X: torch.Tensor, y: np.ndarray, device: torch.
         if ep % 15 == 0:
             print(f"  epoch {ep:3d}/{epochs} | BCE: {running / len(dl.dataset):.4f}")
 
-#######################################################################################
-# Main routine                                                                        #
-#######################################################################################
 
 def run_holdout_moe(csv_path: str, cfg: DictConfig):
     df_full = pd.read_csv(csv_path)
@@ -101,9 +95,6 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
     df      = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
     n_classes = int(labels.max() + 1)
 
-    # ------------------------------------------------------------------
-    # Hold-out split
-    # ------------------------------------------------------------------
     val_frac = OmegaConf.select(cfg, "experiment.validation_split", default=0.2)
     tr_idx, va_idx = train_test_split(np.arange(len(labels)), test_size=val_frac,
                                       stratify=labels, random_state=42)
@@ -115,7 +106,7 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
     out_dir = os.path.abspath(os.path.join("outputs", cfg.experiment.metadata.tag))
     os.makedirs(out_dir, exist_ok=True)
 
-    # Phase 1 -------------------------------------------------------------------------
+    # Phase 1
     print("\n== PHASE 1: training per-class experts ==")
     experts: List[nn.Module] = []
     for cls in range(n_classes):
@@ -145,7 +136,6 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
         )
         experts.append(model.eval())
 
-    # Collect expert probabilities ----------------------------------------------------
     tr_full_ds = EmbeddingDataset(df_tr); tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
     va_full_ds = EmbeddingDataset(df_va); va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
 
@@ -155,7 +145,7 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
 
     X_tr, X_va = collect(tr_ld_full), collect(va_ld_full)
 
-    # Phase 2 -------------------------------------------------------------------------
+    # Phase 2
     print("\n== PHASE 2: training router (BCE+one-hot) ==")
     router_cfg = OmegaConf.select(cfg, "router", default={})
     router = Router(num_experts=n_classes)
@@ -164,7 +154,7 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
                   lr=router_cfg.get("lr", 2e-3),
                   batch_size=router_cfg.get("batch_size", 256))
 
-    # Evaluation ----------------------------------------------------------------------
+    # Evaluation
     router.eval()
     with torch.no_grad():
         logits_va = router(X_va.to(device))
@@ -182,10 +172,6 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
     plot_multiclass_roc_curve(y_va, probs_va, EXPERIMENT_NAME=out_dir)
     with open(os.path.join(out_dir, "metrics.json"), "w") as f:
         json.dump({"accuracy": acc, "weighted_f1": w_f1}, f, indent=4)
-
-#######################################################################################
-# CLI                                                                                 #
-#######################################################################################
 
 @hydra.main(version_base=None, config_path="config", config_name="esc50")
 def main(cfg: DictConfig):

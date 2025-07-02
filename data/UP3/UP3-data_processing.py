@@ -13,9 +13,7 @@ from torchvision import transforms, models
 from torch.utils.data import Dataset, DataLoader
 from torch import nn
 
-# ----------------------------------------------------------------------
 class UP3ImageDataset(Dataset):
-    """Recorre subcarpetas y retorna imágenes, clases y nombres."""
     def __init__(self, root_dir, transform):
         self.samples = []
         self.transform = transform
@@ -40,7 +38,6 @@ class UP3ImageDataset(Dataset):
         image = self.transform(image)
         return image, cls, os.path.basename(path)
 
-# ----------------------------------------------------------------------
 def extract_embeddings(model, dataloader, device, out_dir):
     model.eval()
     meta_rows, all_embs = [], []
