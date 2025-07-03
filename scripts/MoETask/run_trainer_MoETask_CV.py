@@ -185,10 +185,10 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         print("  == PHASE 2: training router ==")
         router = Router(input_dim=n_classes, hidden_dim=cfg.experiment.router.hidden_dim, output_dim=n_classes, drop_prob=cfg.experiment.router.drop_prob)
         _train_router(router, X_tr, y_tr, device,
-                      epochs=cfg.experiment.epochs,
-                      lr=cfg.experiment.lr,
-                      batch_size=cfg.experiment.batch_size,
-                      weight_decay=cfg.experiment.weight_decay)
+                      epochs=cfg.experiment.router.epochs,
+                      lr=cfg.experiment.router.lr,
+                      batch_size=cfg.experiment.router.batch_size,
+                      weight_decay=cfg.experiment.router.weight_decay)
         val_duration_tracker = EmissionsTracker(
             project_name=f"{tag}_fold{fold}_router_val_duration",
             output_dir=str(fold_dir),
