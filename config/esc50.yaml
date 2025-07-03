@@ -30,7 +30,14 @@ experiment:
     label_smoothing: 0.10851194368924916
     patience: 15
     factor: 0.6156433661410728
-    
+  
+  router:
+    hidden_dim: 128 
+    drop_prob: 0.2
+    epochs: 75
+    lr: 2e-3
+    batch_size: 256
+    weight_decay: 1e-4
 
   cross_validation:
     n_splits: 5

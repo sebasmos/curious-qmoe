@@ -183,13 +183,12 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         collect = lambda ld: torch.cat([_pos_prob(exp, ld, device).unsqueeze(1) for exp in experts], dim=1)
         X_tr, X_va = collect(tr_ld_full), collect(va_ld_full)
         print("  == PHASE 2: training router ==")
-        router_cfg = getattr(cfg, "router", {})
-        router = Router(input_dim=n_classes, hidden_dim=router_cfg.get("hidden_dim", 128), output_dim=n_classes, drop_prob=router_cfg.get("drop_prob", 0.2))
+        router = Router(input_dim=n_classes, hidden_dim=cfg.experiment.router.hidden_dim, output_dim=n_classes, drop_prob=cfg.experiment.router.drop_prob)
         _train_router(router, X_tr, y_tr, device,
-                      epochs=router_cfg.get("epochs", 75),
-                      lr=router_cfg.get("lr", 2e-3),
-                      batch_size=router_cfg.get("batch_size", 256),
-                      weight_decay=router_cfg.get("weight_decay", 1e-4))
+                      epochs=cfg.experiment.epochs,
+                      lr=cfg.experiment.lr,
+                      batch_size=cfg.experiment.batch_size,
+                      weight_decay=cfg.experiment.weight_decay)
         val_duration_tracker = EmissionsTracker(
             project_name=f"{tag}_fold{fold}_router_val_duration",
             output_dir=str(fold_dir),
