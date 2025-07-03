@@ -17,20 +17,16 @@ python run_trainer_MoETask_holdout.py \
   --config-name esc50 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
-  experiment.metadata.tag=EfficientNet_esc50MoEData
+  experiment.metadata.tag=DELETE
 """
-
-# ── Bootstrap so Hydra finds ./config no matter where the script lives ────
+#!/usr/bin/env python
 from pathlib import Path
 import os, sys
-ROOT = Path(__file__).resolve().parents[2]      # → /…/QWave
+ROOT = Path(__file__).resolve().parents[2]
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
-# -------------------------------------------------------------------------
-
 import json, warnings
 from typing import List, Dict
-
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import numpy as np
@@ -40,9 +36,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
-
 from codecarbon import EmissionsTracker
-
 from QWave.datasets import EmbeddingDataset
 from QWave.models import ESCModel, reset_weights
 from QWave.train_utils import train_pytorch_local
@@ -50,40 +44,53 @@ from QWave.graphics import plot_multiclass_roc_curve
 from QWave.utils import get_device
 
 class Router(nn.Module):
-    """Linear router (no softmax)."""
-    def __init__(self, num_experts: int):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, drop_prob: float = 0.2):
         super().__init__()
-        self.fc = nn.Linear(num_experts, num_experts)
-        nn.init.xavier_uniform_(self.fc.weight)
-        nn.init.zeros_(self.fc.bias)
-    def forward(self, x: torch.Tensor):
-        return self.fc(x)
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(drop_prob),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, output_dim)
+        )
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
 
 def _pos_prob(model: nn.Module, loader: DataLoader, device: torch.device):
-    model.eval(); out = []
+    model.eval()
+    out = []
     with torch.no_grad():
         for xb, _ in loader:
             xb = xb.to(device)
             out.append(torch.softmax(model(xb), dim=1)[:, 1].cpu())
     return torch.cat(out)
 
-
 def _train_router(router: Router, X: torch.Tensor, y: np.ndarray, device: torch.device,
-                  *, epochs: int, lr: float, batch_size: int):
-    y_onehot = torch.eye(router.fc.out_features)[y].float()
+                  epochs: int, lr: float, batch_size: int, weight_decay: float):
+    y_onehot = torch.eye(router.net[-1].out_features)[y].float()
     ds = TensorDataset(X, y_onehot)
     dl = DataLoader(ds, batch_size=batch_size, shuffle=True)
-    crit = nn.BCEWithLogitsLoss(); opt = torch.optim.Adam(router.parameters(), lr=lr)
-    router.to(device); router.train()
+    crit = nn.BCEWithLogitsLoss()
+    opt = torch.optim.Adam(router.parameters(), lr=lr, weight_decay=weight_decay)
+    router.to(device)
+    router.train()
     for ep in range(1, epochs + 1):
         run = 0.0
         for xb, yb in dl:
             xb, yb = xb.to(device), yb.to(device)
-            opt.zero_grad(); loss = crit(router(xb), yb); loss.backward(); opt.step()
+            opt.zero_grad()
+            loss = crit(router(xb), yb)
+            loss.backward()
+            opt.step()
             run += loss.item() * len(xb)
         if ep % 15 == 0:
             print(f"    Router epoch {ep:3d} | BCE: {run/len(dl.dataset):.4f}")
-
 
 def _start_tracker(phase: str, out_dir: Path, tag: str) -> EmissionsTracker:
     return EmissionsTracker(
@@ -93,9 +100,7 @@ def _start_tracker(phase: str, out_dir: Path, tag: str) -> EmissionsTracker:
         save_to_file=True,
     )
 
-
 def _load_cc_csv(csv_path: Path) -> Dict:
-    """Return the *last row* of a CodeCarbon CSV as a dict."""
     if not csv_path.is_file():
         return {}
     df = pd.read_csv(csv_path)
@@ -103,28 +108,21 @@ def _load_cc_csv(csv_path: Path) -> Dict:
         return {}
     return df.iloc[-1].to_dict()
 
-
 def run_holdout_moe(csv_path: str, cfg: DictConfig):
-    # ───── data ───────────────────────────────────────────────────────────
     df_full = pd.read_csv(csv_path)
-    labels  = df_full["class_id"].astype(int).values
-    df      = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
+    labels = df_full["class_id"].astype(int).values
+    df = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
     n_classes = int(labels.max() + 1)
-
     val_frac = OmegaConf.select(cfg, "experiment.validation_split", default=0.2)
     tr_idx, va_idx = train_test_split(np.arange(len(labels)), test_size=val_frac,
                                       stratify=labels, random_state=42)
     df_tr, df_va = df.iloc[tr_idx].reset_index(drop=True), df.iloc[va_idx].reset_index(drop=True)
-    y_tr, y_va   = labels[tr_idx], labels[va_idx]
-
-    device  = get_device(cfg)
+    y_tr, y_va = labels[tr_idx], labels[va_idx]
+    device = get_device(cfg)
     out_dir = Path("outputs") / cfg.experiment.metadata.tag
     out_dir.mkdir(parents=True, exist_ok=True)
-
     train_tracker = _start_tracker("train", out_dir, cfg.experiment.metadata.tag)
     train_tracker.start()
-
-    # ───── Phase 1: experts ──────────────────────────────────────────────
     print("\n== PHASE 1: training per-class experts ==")
     experts: List[nn.Module] = []
     for cls in range(n_classes):
@@ -132,18 +130,17 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
         df_tr_bin, df_va_bin = df_tr.copy(), df_va.copy()
         df_tr_bin["class_id"] = (y_tr == cls).astype(int)
         df_va_bin["class_id"] = (y_va == cls).astype(int)
-
-        tr_ds = EmbeddingDataset(df_tr_bin); va_ds = EmbeddingDataset(df_va_bin)
+        tr_ds = EmbeddingDataset(df_tr_bin)
+        va_ds = EmbeddingDataset(df_va_bin)
         tr_ld = DataLoader(tr_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
         va_ld = DataLoader(va_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
-
         class_w = torch.tensor(1.0/np.bincount(tr_ds.labels.numpy()), dtype=torch.float32).to(device)
-        in_dim  = tr_ds.features.shape[1]
-        model   = ESCModel(in_dim, 2, hidden_sizes=cfg.experiment.model.hidden_sizes,
-                           dropout_prob=cfg.experiment.model.dropout_prob).to(device)
+        in_dim = tr_ds.features.shape[1]
+        model = ESCModel(in_dim, 2, hidden_sizes=cfg.experiment.model.hidden_sizes,
+                         dropout_prob=cfg.experiment.model.dropout_prob).to(device)
         model.apply(reset_weights)
-
-        exp_dir = out_dir / f"expert_{cls}"; exp_dir.mkdir(exist_ok=True)
+        exp_dir = out_dir / f"expert_{cls}"
+        exp_dir.mkdir(exist_ok=True)
         train_pytorch_local(
             args=cfg.experiment, model=model, train_loader=tr_ld, val_loader=va_ld,
             class_weights=class_w, num_columns=in_dim, device=device,
@@ -151,57 +148,47 @@ def run_holdout_moe(csv_path: str, cfg: DictConfig):
             checkpoint_path=str(exp_dir / "best.pth"),
         )
         experts.append(model.eval())
-
-    tr_full_ds = EmbeddingDataset(df_tr); tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
-    va_full_ds = EmbeddingDataset(df_va); va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
+    tr_full_ds = EmbeddingDataset(df_tr)
+    tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
+    va_full_ds = EmbeddingDataset(df_va)
+    va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
     collect = lambda ld: torch.cat([_pos_prob(exp, ld, device).unsqueeze(1) for exp in experts], dim=1)
     X_tr, X_va = collect(tr_ld_full), collect(va_ld_full)
-
     print("\n== PHASE 2: training router ==")
     router_cfg = getattr(cfg, "router", {})
-    router = Router(num_experts=n_classes)
+    router = Router(input_dim=n_classes, hidden_dim=router_cfg.get("hidden_dim", 128), output_dim=n_classes, drop_prob=router_cfg.get("drop_prob", 0.2))
     _train_router(router, X_tr, y_tr, device,
                   epochs=router_cfg.get("epochs", 75),
                   lr=router_cfg.get("lr", 2e-3),
-                  batch_size=router_cfg.get("batch_size", 256))
-
+                  batch_size=router_cfg.get("batch_size", 256),
+                  weight_decay=router_cfg.get("weight_decay", 1e-4))
     train_tracker.stop()
     train_stats = _load_cc_csv(out_dir / "emissions_train.csv")
-
     val_tracker = _start_tracker("val", out_dir, cfg.experiment.metadata.tag)
     val_tracker.start()
-
     router.eval()
     with torch.no_grad():
         logits_va = router(X_va.to(device))
-        probs_va  = torch.sigmoid(logits_va).cpu().numpy()
-        y_pred    = probs_va.argmax(axis=1)
-
+        probs_va = torch.sigmoid(logits_va).cpu().numpy()
+        y_pred = probs_va.argmax(axis=1)
     val_tracker.stop()
     val_stats = _load_cc_csv(out_dir / "emissions_val.csv")
-
-    acc  = accuracy_score(y_va, y_pred)
+    acc = accuracy_score(y_va, y_pred)
     w_f1 = f1_score(y_va, y_pred, average="weighted")
-
     print("\n== RESULTS ==")
     print(f" Validation accuracy     : {acc:.4f}")
     print(f" Validation weighted-F1 : {w_f1:.4f}\n")
-
     plot_multiclass_roc_curve(y_va, probs_va, EXPERIMENT_NAME=str(out_dir))
-
-    
     cc_keys = [
-        "project_name", "duration","emissions",
-        "emissions_rate","cpu_power","gpu_power","ram_power","cpu_energy","gpu_energy",
-        "ram_energy","energy_consumed", "cpu_count","cpu_model","gpu_count","gpu_model",
+        "project_name", "duration", "emissions",
+        "emissions_rate", "cpu_power", "gpu_power", "ram_power", "cpu_energy", "gpu_energy",
+        "ram_energy", "energy_consumed", "cpu_count", "cpu_model", "gpu_count", "gpu_model",
         "ram_total_size"
     ]
-
     metrics = {"accuracy": acc, "weighted_f1": w_f1}
     for k in cc_keys:
         metrics[f"train_{k}"] = train_stats.get(k)
-        metrics[f"val_{k}"]   = val_stats.get(k)
-
+        metrics[f"val_{k}"] = val_stats.get(k)
     with open(out_dir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=4)
 
@@ -213,7 +200,6 @@ def main(cfg: DictConfig):
             raise FileNotFoundError(csv_path)
         print(f"\n=== DATASET {name.upper()} → outputs/{cfg.experiment.metadata.tag}")
         run_holdout_moe(str(csv_path), cfg)
-
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=UserWarning)

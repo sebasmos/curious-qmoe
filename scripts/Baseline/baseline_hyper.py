@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-K-Fold CV on embedding CSVs with CodeCarbon energy tracking
+K-Fold CV on embedding CSVs with inner split per fold 
 
 python Baseline.py \
   --config-path /Users/sebasmos/Desktop/QWave/config \

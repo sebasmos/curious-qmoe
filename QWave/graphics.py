@@ -40,14 +40,9 @@ def plot_confusion_matrix(y_true, y_pred, fold_folder):
 def plot_multiclass_roc_curve(all_labels, all_probs, EXPERIMENT_NAME="."):
     os.makedirs(EXPERIMENT_NAME, exist_ok=True)
 
-    # Convert list of probs to numpy array
     all_probs = np.array(all_probs)
-    # Binarize true labels
     label_binarizer = LabelBinarizer()
     y_onehot = label_binarizer.fit_transform(all_labels)
-
-    # If binary classification, reshape
-    # Convert to numpy array (important!)
     if y_onehot.shape[1] == 1:
         y_onehot = np.hstack((1 - y_onehot, y_onehot))
         all_probs = np.array(all_probs)

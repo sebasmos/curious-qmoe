@@ -2,6 +2,11 @@
 """
 K-Fold CV on embedding CSVs
 """
+from pathlib import Path
+import os, sys
+ROOT = Path(__file__).resolve().parents[2]      # → /…/QWave
+os.chdir(ROOT)
+sys.path.insert(0, str(ROOT))
 import os, json, warnings
 import hydra
 from omegaconf import DictConfig

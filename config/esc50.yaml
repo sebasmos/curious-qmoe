@@ -30,11 +30,13 @@ experiment:
     label_smoothing: 0.10851194368924916
     patience: 15
     factor: 0.6156433661410728
+    
 
   cross_validation:
     n_splits: 5
     shuffle: true
     random_seed: 42
+    validation_split_ratio: 0.1
 
   logging:
     log_interval: 50
