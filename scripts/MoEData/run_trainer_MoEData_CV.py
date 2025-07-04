@@ -16,10 +16,11 @@ Key points
 - Metrics – Includes training/inference duration, CodeCarbon energy metrics,
             **CPU utilization percentage**, and **RAM utilization in MB** per fold and in summary.
 
-python run_trainer_MoEData_CV_wrapped.py  --config-name=esc50 \
+python run_trainer_MoEData_CV.py  --config-name=esc50 \
+  experiment.datasets.esc.normalization_type=standard \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
-  experiment.metadata.tag="EfficientNet_esc50MoEData_CV"
+  experiment.metadata.tag="EfficientNet_esc50MoEData_CV_standard_rawoutput"
 
 """
 from pathlib import Path
@@ -42,9 +43,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score, accuracy_score
 
 from codecarbon import EmissionsTracker
-from memory_profiler import memory_usage # Import memory_usage, replacing psutil/threading/time
+from memory_profiler import memory_usage
 
-from QWave.datasets import EmbeddingDataset
+from QWave.datasets import EmbeddingAdaptDataset
 from QWave.models import ESCModel, reset_weights
 from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve
@@ -117,20 +118,29 @@ cc_keys_overall = [
 ]
 
 # --- Helper functions for memory_usage ---
-def _train_experts_phase_wrapper(df_tr_orig, df_va_orig, y_tr_orig, y_va_orig, n_classes, cfg_experiment, device, fold_dir):
+def _train_experts_phase_wrapper(cfg, df_tr_orig, df_va_orig, y_tr_orig, y_va_orig, n_classes, cfg_experiment, device, fold_dir):
     """Encapsulates the entire expert training loop for memory profiling."""
     experts: List[nn.Module] = []
     for cls in range(n_classes):
-        # Data for this expert is derived from the original full fold data
-        tr_ds = EmbeddingDataset(df_tr_orig)
-        va_ds = EmbeddingDataset(df_va_orig)
+
+        normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
+
+        tr_ds = EmbeddingAdaptDataset(df_tr_orig, normalization_type=normalization_type, scaler=None)
+        
+        fitted_scaler = tr_ds.get_scaler()
+        
+        va_ds = EmbeddingAdaptDataset(df_va_orig,normalization_type=normalization_type, scaler=fitted_scaler)
+                              
         tr_ld = DataLoader(tr_ds, batch_size=cfg_experiment.model.batch_size, shuffle=True)
+        
         va_ld = DataLoader(va_ds, batch_size=cfg_experiment.model.batch_size, shuffle=False)
 
         class_w_vals = np.bincount(y_tr_orig)
+        
         class_w = torch.tensor(1.0 / class_w_vals, dtype=torch.float32).to(device)
         
         in_dim  = tr_ds.features.shape[1]
+        
         model   = ESCModel(in_dim, n_classes, # Multi-class expert
                             hidden_sizes=cfg_experiment.model.hidden_sizes,
                             dropout_prob=cfg_experiment.model.dropout_prob).to(device)
@@ -226,18 +236,28 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         print("  == PHASE 1: training experts ==")
         # Use memory_usage to profile the entire expert training phase
         mem_experts_training_usage, experts = memory_usage(
-            (_train_experts_phase_wrapper, (df_tr, df_va, y_tr, y_va, n_classes, cfg.experiment, device, fold_dir)),
+            (_train_experts_phase_wrapper, (cfg, df_tr, df_va, y_tr, y_va, n_classes, cfg.experiment, device, fold_dir)),
             interval=0.1, 
             retval=True
         )
-        max_ram_mb_experts_training = max(mem_experts_training_usage) if mem_experts_training_usage else 0.0
-
+        max_ram_mb_experts_training = sum(mem_experts_training_usage) / len(mem_experts_training_usage)
+    
         train_duration_tracker.stop() 
         # --- End PHASE 1 ---
 
         # Collect expert outputs for router
-        tr_full_ds = EmbeddingDataset(df_tr); tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
-        va_full_ds = EmbeddingDataset(df_va); va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
+
+        normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
+
+        tr_full_ds = EmbeddingAdaptDataset(df_tr, normalization_type=normalization_type, scaler=None)
+        # If using 'standard' or 'min_max' scaling, get the fitted scaler from the training dataset
+        fitted_scaler = tr_full_ds.get_scaler()
+        
+        va_full_ds = EmbeddingAdaptDataset(df_va,normalization_type=normalization_type, scaler=fitted_scaler)
+                            
+        tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
+        
+        va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
         
         collect_expert_outputs = lambda ld: torch.cat([_expert_output_full_probs(exp, ld, device) for exp in experts], dim=1)
         X_tr, X_va = collect_expert_outputs(tr_ld_full), collect_expert_outputs(va_ld_full)
@@ -259,7 +279,7 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
             interval=0.1,
             retval=True
         )
-        max_ram_mb_router_training = max(mem_router_training_usage) if mem_router_training_usage else 0.0
+        max_ram_mb_router_training = sum(mem_router_training_usage) / len(mem_router_training_usage)
         # --- End PHASE 2 ---
         
         # --- PHASE 3: Router Inference/Validation (Memory Profiled) ---
@@ -277,8 +297,8 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
             interval=0.1,
             retval=True
         )
-        max_ram_mb_router_inference = max(mem_router_inference_usage) if mem_router_inference_usage else 0.0
-        
+        max_ram_mb_router_inference =  sum(mem_router_inference_usage) / len(mem_router_inference_usage)
+       
         val_duration_tracker.stop() 
         # --- End PHASE 3 ---
 
@@ -297,13 +317,13 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         fold_result = {
             "best_f1": w_f1,
             "accuracy": acc,
-            "codecarbon_train_duration": train_dur_stats.get("duration"), 
-            "codecarbon_val_duration": val_dur_stats.get("duration"),     
-            "codecarbon_duration": overall_stats.get("duration"),         
+            "train_duration": train_dur_stats.get("duration"), 
+            "val_duration": val_dur_stats.get("duration"),     
+            "duration": overall_stats.get("duration"),         
             # NEW: Add peak RAM metrics to fold results
-            "max_ram_mb_experts_training": float(max_ram_mb_experts_training),
-            "max_ram_mb_router_training": float(max_ram_mb_router_training),
-            "max_ram_mb_router_inference": float(max_ram_mb_router_inference),
+            "avg_ram_mb_experts_training": float(max_ram_mb_experts_training),
+            "avg_ram_mb_router_training": float(max_ram_mb_router_training),
+            "avg_ram_mb_router_inference": float(max_ram_mb_router_inference),
         }
         for k in cc_keys_overall:
             fold_result[f"codecarbon_{k}"] = overall_stats.get(k)
@@ -335,40 +355,39 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
     }
 
     if all_train_duration_data:
-        summary["codecarbon_train_duration_mean"] = float(np.mean(all_train_duration_data))
-        summary["codecarbon_train_duration_std"] = float(np.std(all_train_duration_data))
+        summary["train_duration_mean"] = float(np.mean(all_train_duration_data))
+        summary["train_duration_std"] = float(np.std(all_train_duration_data))
     if all_val_duration_data:
-        summary["codecarbon_val_duration_mean"] = float(np.mean(all_val_duration_data))
-        summary["codecarbon_val_duration_std"] = float(np.std(all_val_duration_data))
+        summary["val_duration_mean"] = float(np.mean(all_val_duration_data))
+        summary["val_duration_std"] = float(np.std(all_val_duration_data))
 
     # NEW: Add aggregated peak RAM metrics to the summary
     if all_max_ram_mb_experts_training:
-        summary["max_ram_mb_experts_training_mean"] = float(np.mean(all_max_ram_mb_experts_training))
-        summary["max_ram_mb_experts_training_std"] = float(np.std(all_max_ram_mb_experts_training))
+        summary["avg_ram_mb_experts_training_mean"] = float(np.mean(all_max_ram_mb_experts_training))
+        summary["avg_ram_mb_experts_training_std"] = float(np.std(all_max_ram_mb_experts_training))
     if all_max_ram_mb_router_training:
-        summary["max_ram_mb_router_training_mean"] = float(np.mean(all_max_ram_mb_router_training))
-        summary["max_ram_mb_router_training_std"] = float(np.std(all_max_ram_mb_router_training))
+        summary["avg_ram_mb_router_training_mean"] = float(np.mean(all_max_ram_mb_router_training))
+        summary["avg_ram_mb_router_training_std"] = float(np.std(all_max_ram_mb_router_training))
     if all_max_ram_mb_router_inference:
-        summary["max_ram_mb_router_inference_mean"] = float(np.mean(all_max_ram_mb_router_inference))
-        summary["max_ram_mb_router_inference_std"] = float(np.std(all_max_ram_mb_router_inference))
+        summary["avg_ram_mb_router_inference_mean"] = float(np.mean(all_max_ram_mb_router_inference))
+        summary["avg_ram_mb_router_inference_std"] = float(np.std(all_max_ram_mb_router_inference))
 
     for k in all_overall_codecarbon_data:
         if all_overall_codecarbon_data[k]:
             if all(isinstance(val, (int, float)) for val in all_overall_codecarbon_data[k]):
-                summary[f"codecarbon_{k}_mean"] = float(np.mean(all_overall_codecarbon_data[k]))
-                summary[f"codecarbon_{k}_std"] = float(np.std(all_overall_codecarbon_data[k]))
+                summary[f"{k}_mean"] = float(np.mean(all_overall_codecarbon_data[k]))
+                summary[f"{k}_std"] = float(np.std(all_overall_codecarbon_data[k]))
             else:
                 unique_values = list(set(all_overall_codecarbon_data[k]))
                 if len(unique_values) == 1:
-                    summary[f"codecarbon_{k}_common"] = unique_values[0]
+                    summary[f"{k}_common"] = unique_values[0]
                 else:
-                    summary[f"codecarbon_{k}_all"] = unique_values
+                    summary[f"{k}_all"] = unique_values
 
     with open(out_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=4)
     print("\n== CV SUMMARY ==")
     print(json.dumps(summary, indent=4))
-
 
 @hydra.main(version_base=None, config_path=str(ROOT / "config"), config_name="esc50")
 def main(cfg: DictConfig):
