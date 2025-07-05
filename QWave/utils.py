@@ -5,7 +5,7 @@ import pickle
 import numpy as np 
 import torch
 import pandas as pd
-
+import os
 # def save_predictions(args, model_name, seed, y_test, y_pred, model, metrics):
 def save_predictions(pred_folder, model_name, model, metrics, y_test, y_pred,seed):
     """
@@ -28,14 +28,14 @@ def save_predictions(pred_folder, model_name, model, metrics, y_test, y_pred,see
     df.to_csv(os.path.join(pred_folder, f'metrics_seed_{seed}.csv'), index=False)
     store_pickle_model(model, model_name, seed, pred_folder)
 
-def seed_everything(seed):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    #torch.backends.cudnn.deterministic = True
-    #torch.backends.cudnn.benchmark = True
+def set_seed(seed):
+        os.environ['PYTHONHASHSEED'] = str(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False # Set to False for reproducibility, True for performance
 
 
 def store_pickle_model(model, model_name, seed, model_path):

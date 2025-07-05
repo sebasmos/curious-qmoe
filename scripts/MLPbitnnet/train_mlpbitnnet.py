@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 """
 K-Fold CV on embedding CSVs with CodeCarbon energy tracking
-(Corrected BitNet Implementation)
-
-python test2.py \
+epochs=200,learning_rate=0.01, patience=50
+python train_mlpbitnnet.py \
   --config-path /Users/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
-  experiment.datasets.esc.normalization_type=raw \
+  experiment.datasets.esc.normalization_type=standard \
   experiment.model.epochs=200 \
   experiment.model.patience=50 \
   experiment.model.learning_rate=0.01 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
-  experiment.metadata.tag=bitnnet_esc50_raw 
+  experiment.metadata.tag=bitnnet_esc50_standard
 """
 
 from pathlib import Path
@@ -35,7 +34,7 @@ from sklearn.preprocessing import StandardScaler
 from torch import nn
 import torch.nn.functional as F
 from QWave.bitnnet import MLPBitnet, reset_weights
-from QWave.datasets import EmbeddingDataset,EmbeddingAdaptDataset
+from QWave.datasets import EmbeddingDataset, EmbeddingAdaptDataset
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.utils import get_device, set_seed
@@ -94,22 +93,25 @@ def run_cv(csv_path: str, cfg: DictConfig):
     all_max_ram_mb_val = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
+        
         print(f"\n--- FOLD {fold+1}/{skf.n_splits} ---")
+        
         fold_dir = out_dir / f"fold_{fold}"
+        
         fold_dir.mkdir(exist_ok=True)
 
         df_train = df.iloc[train_idx].reset_index(drop=True)
+        
         df_val = df.iloc[val_idx].reset_index(drop=True)
-
         
         normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
 
         train_ds = EmbeddingAdaptDataset(df_train,normalization_type=normalization_type, scaler=None)
-        # If using 'standard' or 'min_max' scaling, get the fitted scaler from the training dataset
+        
         fitted_scaler = train_ds.get_scaler()
+        
         val_ds = EmbeddingAdaptDataset(df_val,normalization_type=normalization_type, scaler=fitted_scaler)
         
-
         print("Label distribution:", np.bincount(train_ds.labels.numpy()))
         print("Feature range:", train_ds.features.min().item(), train_ds.features.max().item())
 
@@ -128,7 +130,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
         ).to(device)
         model.apply(reset_weights)
 
-        # Assuming the loss function in `train_pytorch_local` is nn.CrossEntropyLoss
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32)
         class_weights = class_weights / class_weights.sum() * len(class_weights)
         class_weights = class_weights.to(device)
@@ -164,7 +165,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 retval=True
             )
 
-        max_ram_mb_train = max(mem_train_usage) if mem_train_usage else 0.0
+        max_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
+        
         print("Train losses (last 5):", train_losses[-5:])
         print("Val losses (last 5):", val_losses[-5:])
 
@@ -186,9 +188,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
             use_residual=False
         ).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
-        final_model.eval() # Set model to evaluation mode for inference
+        final_model.eval()
 
-        # Assuming the criterion in `_validate_single_epoch` is nn.CrossEntropyLoss
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
         mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
             memory_usage(
@@ -202,7 +203,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 retval=True
             )
 
-        max_ram_mb_val = max(mem_val_usage) if mem_val_usage else 0.0
+        max_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
 
         val_tracker.stop()
 
@@ -222,11 +223,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
         }
 
         for k in cc_metrics_to_track:
-            fold_result[f"codecarbon_train_{k}"] = train_stats.get(k, 0.0)
+            fold_result[f"train_{k}"] = train_stats.get(k, 0.0)
             all_train_cc_data_agg[k].append(train_stats.get(k, 0.0))
 
         for k in cc_metrics_to_track:
-            fold_result[f"codecarbon_val_{k}"] = val_stats.get(k, 0.0)
+            fold_result[f"val_{k}"] = val_stats.get(k, 0.0)
             all_val_cc_data_agg[k].append(val_stats.get(k, 0.0))
 
         all_final_f1_scores.append(final_f1_weighted)
@@ -252,24 +253,24 @@ def run_cv(csv_path: str, cfg: DictConfig):
     }
 
     if all_max_ram_mb_train:
-        summary["max_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
-        summary["max_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))
+        summary["avg_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
+        summary["avg_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))
     if all_max_ram_mb_val:
-        summary["max_ram_mb_val_mean"] = float(np.mean(all_max_ram_mb_val))
-        summary["max_ram_mb_val_std"] = float(np.std(all_max_ram_mb_val))
+        summary["avg__ram_mb_val_mean"] = float(np.mean(all_max_ram_mb_val))
+        summary["avg_ram_mb_val_std"] = float(np.std(all_max_ram_mb_val))
 
     for phase_data_agg, prefix in [(all_train_cc_data_agg, "train"), (all_val_cc_data_agg, "val")]:
         for k in cc_metrics_to_track:
             if phase_data_agg[k]:
                 if all(isinstance(val, (int, float)) for val in phase_data_agg[k]):
-                    summary[f"codecarbon_{prefix}_{k}_mean"] = float(np.mean(phase_data_agg[k]))
-                    summary[f"codecarbon_{prefix}_{k}_std"] = float(np.std(phase_data_agg[k]))
+                    summary[f"{prefix}_{k}_mean"] = float(np.mean(phase_data_agg[k]))
+                    summary[f"{prefix}_{k}_std"] = float(np.std(phase_data_agg[k]))
                 else:
                     unique_values = list(set(phase_data_agg[k]))
                     if len(unique_values) == 1:
-                        summary[f"codecarbon_{prefix}_{k}_common"] = unique_values[0]
+                        summary[f"{prefix}_{k}_common"] = unique_values[0]
                     else:
-                        summary[f"codecarbon_{prefix}_{k}_all"] = unique_values
+                        summary[f"{prefix}_{k}_all"] = unique_values
 
     with open(out_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=4)

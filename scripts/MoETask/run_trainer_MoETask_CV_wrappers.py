@@ -18,9 +18,7 @@ python run_trainer_MoETask_CV_wrappers.py  --config-name=esc50 \
   experiment.datasets.esc.normalization_type=standard \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
-  experiment.router.epochs=150\
   experiment.metadata.tag="EfficientNet_esc50MoETask_CV_standard"
-
 """
 
 from pathlib import Path
@@ -42,7 +40,7 @@ from sklearn.metrics import f1_score, accuracy_score
 from codecarbon import EmissionsTracker
 from memory_profiler import memory_usage # Import memory_usage
 
-from QWave.datasets import EmbeddingDataset, EmbeddingAdaptDataset
+from QWave.datasets import EmbeddingAdaptDataset
 from QWave.models import ESCModel, reset_weights
 from QWave.train_utils import train_pytorch_local
 from QWave.graphics import plot_multiclass_roc_curve
@@ -63,8 +61,6 @@ def _train_experts_phase_wrapper(cfg, df_tr, df_va, y_tr, y_va, n_classes, cfg_e
         df_tr_bin, df_va_bin = df_tr.copy(), df_va.copy()
         df_tr_bin["class_id"] = (y_tr == cls).astype(int)
         df_va_bin["class_id"] = (y_va == cls).astype(int)
-        # tr_ds = EmbeddingDataset(df_tr_bin)
-        # va_ds = EmbeddingDataset(df_va_bin)
 
         normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
 
@@ -253,12 +249,6 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         train_duration_tracker.stop()
         # --- End PHASE 1 ---
 
-        # tr_full_ds = EmbeddingDataset(df_tr)
-        # tr_ld_full = DataLoader(tr_full_ds, batch_size=cfg.experiment.model.batch_size)
-        # va_full_ds = EmbeddingDataset(df_va)
-        # va_ld_full = DataLoader(va_full_ds, batch_size=cfg.experiment.model.batch_size)
-        
-
         normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
 
         tr_full_ds = EmbeddingAdaptDataset(df_tr,normalization_type=normalization_type, scaler=None)
@@ -286,7 +276,7 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
             interval=0.1,
             retval=True
         )
-        max_ram_mb_router_training = max(mem_router_training_usage) if mem_router_training_usage else 0.0
+        avg_ram_mb_router_training = sum(mem_router_training_usage) / len(mem_router_training_usage)
         # --- End PHASE 2 ---
 
         # --- PHASE 3: Router Inference/Validation (Memory Profiled) ---
@@ -303,8 +293,8 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
             interval=0.1,
             retval=True
         )
-        max_ram_mb_router_inference = max(mem_router_inference_usage) if mem_router_inference_usage else 0.0
-
+        avg_ram_mb_router_inference = sum(mem_router_inference_usage) / len(mem_router_inference_usage)
+        
         val_duration_tracker.stop()
         # --- End PHASE 3 ---
 
@@ -325,8 +315,8 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
             "val_duration": val_dur_stats.get("duration"), # Router inference duration
             "duration": overall_stats.get("duration"),
             "avg_ram_mb_experts_training": float(avg_ram_mb_experts_training),
-            "max_ram_mb_router_training": float(max_ram_mb_router_training),
-            "max_ram_mb_router_inference": float(max_ram_mb_router_inference),
+            "avg_ram_mb_router_training": float(avg_ram_mb_router_training),
+            "avg_ram_mb_router_inference": float(avg_ram_mb_router_inference),
         }
         for k in cc_keys_overall:
             fold_result[f"{k}"] = overall_stats.get(k)
@@ -339,8 +329,8 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
         all_val_duration_data.append(val_dur_stats.get("duration"))
         
         all_max_ram_mb_experts_training.append(avg_ram_mb_experts_training)
-        all_max_ram_mb_router_training.append(max_ram_mb_router_training)
-        all_max_ram_mb_router_inference.append(max_ram_mb_router_inference)
+        all_max_ram_mb_router_training.append(avg_ram_mb_router_training)
+        all_max_ram_mb_router_inference.append(avg_ram_mb_router_inference)
 
         fold_results.append(fold_result)
         with open(fold_dir / "metrics.json", "w") as f:
@@ -364,14 +354,14 @@ def run_cv_moe(csv_path: str, cfg: DictConfig):
 
     # Aggregate peak RAM metrics
     if all_max_ram_mb_experts_training:
-        summary["max_ram_mb_experts_training_mean"] = float(np.mean(all_max_ram_mb_experts_training))
-        summary["max_ram_mb_experts_training_std"] = float(np.std(all_max_ram_mb_experts_training))
+        summary["avg_ram_mb_experts_training_mean"] = float(np.mean(all_max_ram_mb_experts_training))
+        summary["avg_ram_mb_experts_training_std"] = float(np.std(all_max_ram_mb_experts_training))
     if all_max_ram_mb_router_training:
-        summary["max_ram_mb_router_training_mean"] = float(np.mean(all_max_ram_mb_router_training))
-        summary["max_ram_mb_router_training_std"] = float(np.std(all_max_ram_mb_router_training))
+        summary["avg_ram_mb_router_training_mean"] = float(np.mean(all_max_ram_mb_router_training))
+        summary["avg_ram_mb_router_training_std"] = float(np.std(all_max_ram_mb_router_training))
     if all_max_ram_mb_router_inference:
-        summary["max_ram_mb_router_inference_mean"] = float(np.mean(all_max_ram_mb_router_inference))
-        summary["max_ram_mb_router_inference_std"] = float(np.std(all_max_ram_mb_router_inference))
+        summary["avg_ram_mb_router_inference_mean"] = float(np.mean(all_max_ram_mb_router_inference))
+        summary["avg_ram_mb_router_inference_std"] = float(np.std(all_max_ram_mb_router_inference))
 
     for k in all_overall_codecarbon_data:
         if all_overall_codecarbon_data[k]:

@@ -1,17 +1,6 @@
 import os
 import time
 import torch
-import pandas as pd
-import numpy as np
-from torch import nn
-from torch.utils.data import DataLoader
-from sklearn.metrics import f1_score, confusion_matrix
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from QWave.graphics import plot_training_curves, plot_multiclass_roc_curve, plot_losses, show_image, save_confusion_matrix, plot_confusion_matrix
-
-import os
-import time
-import torch
 import numpy as np # Import numpy
 from torch import nn
 from torch.utils.data import DataLoader # Keep if used
@@ -66,7 +55,7 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.model.learning_rate, weight_decay=args.model.weight_decay)
     criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=args.model.label_smoothing)
     scheduler = ReduceLROnPlateau(optimizer, mode='max', patience=args.model.patience, factor=args.model.factor) # mode='max' for F1
-
+    
     train_losses, val_losses = [], []
     # These will store the labels/preds/probs from the epoch that achieved the best_f1
     all_labels_best_epoch, all_preds_best_epoch, all_probs_best_epoch = [], [], []

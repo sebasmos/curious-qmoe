@@ -1,7 +1,8 @@
 # SClassifier, reset_weightsimport torch
 from torch import nn
 import timm
-import torch.nn as nn
+import torch
+import torch.nn.functional as F
 
 
 class ESCModel(nn.Module):
@@ -11,7 +12,7 @@ class ESCModel(nn.Module):
         self.fc_layers = self._create_fc_layers(input_size, hidden_sizes, dropout_prob, activation_fn)
         self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
         self.activation_fn = activation_fn()
-        self.softmax = nn.LogSoftmax(dim=1)
+        # self.softmax = nn.LogSoftmax(dim=1)
 
     def _create_fc_layers(self, input_size, hidden_sizes, dropout_prob, activation_fn):
         layers = []
@@ -30,7 +31,7 @@ class ESCModel(nn.Module):
         if self.use_residual and residual.shape == x.shape:
             x += residual 
         x = self.output_layer(x)
-        x = self.softmax(x)
+        # x = self.softmax(x)
         return x
 
 def reset_weights(m):

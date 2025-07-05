@@ -5,9 +5,10 @@ K-Fold CV on embedding CSVs with CodeCarbon energy tracking
 python Baseline.py \
   --config-path /Users/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
+  experiment.datasets.esc.normalization_type=l2 \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
-  experiment.metadata.tag=EfficientNet_esc50Baseline
+  experiment.metadata.tag=ENet_esc50Baseline_outminl2_raw
 """
 
 from pathlib import Path
@@ -27,7 +28,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from codecarbon import EmissionsTracker
 from memory_profiler import memory_usage # Import memory_usage
 
-from QWave.datasets import EmbeddingDataset
+from QWave.datasets import EmbeddingAdaptDataset
 from QWave.models import ESCModel, reset_weights
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
@@ -84,15 +85,23 @@ def run_cv(csv_path: str, cfg: DictConfig):
         fold_dir.mkdir(exist_ok=True)
 
         df_train = df.iloc[train_idx].reset_index(drop=True)
+        
         df_val = df.iloc[val_idx].reset_index(drop=True) 
 
-        train_ds = EmbeddingDataset(df_train)
-        val_ds = EmbeddingDataset(df_val)
+        normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw") # Default to "raw" if not specified
+
+        train_ds = EmbeddingAdaptDataset(df_train,normalization_type=normalization_type, scaler=None)
+        
+        fitted_scaler = train_ds.get_scaler()
+        
+        val_ds = EmbeddingAdaptDataset(df_val,normalization_type=normalization_type, scaler=fitted_scaler)
         
         train_ld = torch.utils.data.DataLoader(train_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
+        
         val_ld = torch.utils.data.DataLoader(val_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
         in_dim = train_ds.features.shape[1]
+        
         num_classes = len(np.unique(labels)) 
         
         model = ESCModel(
@@ -101,11 +110,13 @@ def run_cv(csv_path: str, cfg: DictConfig):
             hidden_sizes=cfg.experiment.model.hidden_sizes,
             dropout_prob=cfg.experiment.model.dropout_prob
         ).to(device)
+        
         model.apply(reset_weights)
 
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         
         ckpt_path = fold_dir / "best_model.pth"
+        
         resume = cfg.experiment.logging.resume and ckpt_path.exists()
 
         train_tracker = EmissionsTracker(
@@ -136,8 +147,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 retval=True
             )
         
-        max_ram_mb_train = max(mem_train_usage) if mem_train_usage else 0.0
-
+        max_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
         train_tracker.stop()
 
         val_tracker = EmissionsTracker( 
@@ -169,8 +179,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 retval=True
             )
         
-        max_ram_mb_val = max(mem_val_usage) if mem_val_usage else 0.0
-
+        max_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
+        
         val_tracker.stop()
 
         train_stats = _load_cc_csv(fold_dir / "emissions_train.csv") 
@@ -189,11 +199,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
         }
 
         for k in cc_metrics_to_track:
-            fold_result[f"codecarbon_train_{k}"] = train_stats.get(k, 0.0)
+            fold_result[f"train_{k}"] = train_stats.get(k, 0.0)
             all_train_cc_data_agg[k].append(train_stats.get(k, 0.0))
 
         for k in cc_metrics_to_track:
-            fold_result[f"codecarbon_val_{k}"] = val_stats.get(k, 0.0)
+            fold_result[f"val_{k}"] = val_stats.get(k, 0.0)
             all_val_cc_data_agg[k].append(val_stats.get(k, 0.0))
 
         all_final_f1_scores.append(final_f1_weighted)
@@ -220,24 +230,24 @@ def run_cv(csv_path: str, cfg: DictConfig):
 
     # Aggregate max RAM metrics
     if all_max_ram_mb_train:
-        summary["max_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
-        summary["max_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))
+        summary["avg_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
+        summary["avg_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))
     if all_max_ram_mb_val:
-        summary["max_ram_mb_val_mean"] = float(np.mean(all_max_ram_mb_val))
-        summary["max_ram_mb_val_std"] = float(np.std(all_max_ram_mb_val))
+        summary["avg_ram_mb_val_mean"] = float(np.mean(all_max_ram_mb_val))
+        summary["avg_ram_mb_val_std"] = float(np.std(all_max_ram_mb_val))
 
     for phase_data_agg, prefix in [(all_train_cc_data_agg, "train"), (all_val_cc_data_agg, "val")]:
         for k in cc_metrics_to_track:
             if phase_data_agg[k]:
                 if all(isinstance(val, (int, float)) for val in phase_data_agg[k]):
-                    summary[f"codecarbon_{prefix}_{k}_mean"] = float(np.mean(phase_data_agg[k]))
-                    summary[f"codecarbon_{prefix}_{k}_std"] = float(np.std(phase_data_agg[k]))
+                    summary[f"{prefix}_{k}_mean"] = float(np.mean(phase_data_agg[k]))
+                    summary[f"{prefix}_{k}_std"] = float(np.std(phase_data_agg[k]))
                 else:
                     unique_values = list(set(phase_data_agg[k]))
                     if len(unique_values) == 1:
-                        summary[f"codecarbon_{prefix}_{k}_common"] = unique_values[0]
+                        summary[f"{prefix}_{k}_common"] = unique_values[0]
                     else:
-                        summary[f"codecarbon_{prefix}_{k}_all"] = unique_values 
+                        summary[f"{prefix}_{k}_all"] = unique_values 
 
 
     with open(out_dir / "summary.json", "w") as f:
@@ -255,7 +265,6 @@ def main(cfg: DictConfig):
             raise FileNotFoundError(csv_path)
         print(f"\n=== DATASET {name.upper()} → outputs/{cfg.experiment.metadata.tag}")
         run_cv(str(csv_path), cfg)
-
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=UserWarning)

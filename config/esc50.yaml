@@ -16,13 +16,14 @@ experiment:
       imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
       # csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
       # imgs: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
+      normalization_type: "standard" # "l2" # or "standard", "min_max", "raw"
 
   model:
     batch_size: 64
     hidden_sizes: [640, 320]
     learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243
-    epochs: 81
+    epochs: 1
     early_stopping:
       patience: 19
       delta: 0.01
@@ -34,7 +35,7 @@ experiment:
   router:
     hidden_dim: 128 
     drop_prob: 0.2
-    epochs: 75
+    epochs: 150
     lr: 2e-3
     batch_size: 256
     weight_decay: 1e-4
