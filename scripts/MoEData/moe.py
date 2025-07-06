@@ -1,8 +1,9 @@
-#!/usr/bin/env python
+# 
+# #!/usr/bin/env python
 """
 K-Fold CV on embedding CSVs with CodeCarbon energy tracking
 
-CUDA_VISIBLE_DEVICES=1 python moe_deeprouter.py \
+CUDA_VISIBLE_DEVICES=1 python moe.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
@@ -228,12 +229,13 @@ def main(cfg: DictConfig):
     skf = StratifiedKFold(n_splits=cfg.experiment.cross_validation.n_splits, shuffle=True, random_state=42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device = get_device(cfg)
+    print(f"Final selected device: {device}\n")
     tag = cfg.experiment.metadata.tag
     out_dir = Path("outputs") / tag
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_max_ram_mb_train, all_max_ram_mb_val = [], []
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] # Renamed for clarity with average
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_training_durations = [] # New list to store training durations
@@ -258,16 +260,9 @@ def main(cfg: DictConfig):
 
         in_dim = train_ds.features.shape[1]
         num_classes = len(np.unique(labels))
-        # Ensure that MoEModelBatched is used here if load_balancing is true
-        if cfg.experiment.get("load_balancing", True):
-            model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
-        else:
-            # Fallback to the simpler MoEModel if load_balancing is disabled and you don't want the extra returns
-            # However, for consistency with train_moe_local, it's better to use MoEModelBatched
-            # and just ignore the load_balancing_loss if cfg.experiment.get("load_balancing", True) is False
-            model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
-
-
+        
+        model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
+        
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
@@ -279,12 +274,17 @@ def main(cfg: DictConfig):
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
             memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) # Kept as average
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
         all_training_durations.append(training_duration)
-        max_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
+        
 
+        # --- Clear CUDA cache between training and validation ---
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("CUDA cache emptied after training.")
 
         val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(fold_dir), output_file="emissions_val.csv")
         val_tracker.start()
@@ -297,7 +297,7 @@ def main(cfg: DictConfig):
         val_start_time = time.perf_counter()
 
         mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
-        
+        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage) # Kept as average
         val_end_time = time.perf_counter()
         
         validation_duration = val_end_time - val_start_time
@@ -305,7 +305,7 @@ def main(cfg: DictConfig):
         val_tracker.stop()
         
         all_validation_durations.append(validation_duration)
-        max_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
+        
 
         train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
         val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
@@ -317,8 +317,8 @@ def main(cfg: DictConfig):
         fold_result = {
             "best_f1": final_f1_weighted,
             "accuracy": final_accuracy,
-            "max_ram_mb_train": float(max_ram_mb_train),
-            "max_ram_mb_val": float(max_ram_mb_val),
+            "avg_ram_mb_train": float(avg_ram_mb_train), # Using avg
+            "avg_ram_mb_val": float(avg_ram_mb_val),     # Using avg
             "training_duration_seconds": float(training_duration),  # Add training duration
             "validation_duration_seconds": float(validation_duration) # Add validation duration
         }
@@ -332,8 +332,8 @@ def main(cfg: DictConfig):
 
         all_final_f1_scores.append(final_f1_weighted)
         all_final_accuracy_scores.append(final_accuracy)
-        all_max_ram_mb_train.append(max_ram_mb_train)
-        all_max_ram_mb_val.append(max_ram_mb_val)
+        all_avg_ram_mb_train.append(avg_ram_mb_train) # Using avg
+        all_avg_ram_mb_val.append(avg_ram_mb_val)     # Using avg
 
         plot_multiclass_roc_curve(all_labels_final, all_probs_final, EXPERIMENT_NAME=str(fold_dir))
         plot_losses(train_losses, val_losses, str(fold_dir))
@@ -355,12 +355,12 @@ def main(cfg: DictConfig):
         "folds": fold_metrics
     }
 
-    if all_max_ram_mb_train:
-        summary["avg_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
-        summary["avg_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))
-    if all_max_ram_mb_val:
-        summary["avg_ram_mb_val_mean"] = float(np.mean(all_max_ram_mb_val))
-        summary["avg_ram_mb_val_std"] = float(np.std(all_max_ram_mb_val))
+    if all_avg_ram_mb_train:
+        summary["avg_ram_mb_train_mean"] = float(np.mean(all_avg_ram_mb_train))
+        summary["avg_ram_mb_train_std"] = float(np.std(all_avg_ram_mb_train))
+    if all_avg_ram_mb_val:
+        summary["avg_ram_mb_val_mean"] = float(np.mean(all_avg_ram_mb_val))
+        summary["avg_ram_mb_val_std"] = float(np.std(all_avg_ram_mb_val))
 
     for phase_data_agg, prefix in [(all_train_cc_data_agg, "train"), (all_val_cc_data_agg, "val")]:
         for k in cc_metrics_to_track:
