@@ -138,20 +138,77 @@ def consolidate_and_average_metrics(args, output_folder):
     else:
         print("No metrics were found for any seed. Cannot calculate average metrics.")
 
+# def get_device(cfg):
+#     preferred = cfg.experiment.get("device", "auto").lower()
+#     if preferred == "cuda" and torch.cuda.is_available():
+#         return torch.device("cuda")
+#     elif preferred == "mps" and torch.backends.mps.is_available():
+#         return torch.device("mps")
+#     elif preferred == "cpu":
+#         return torch.device("cpu")
+#     elif preferred == "auto":
+#         if torch.cuda.is_available():
+#             return torch.device("cuda")
+#         elif torch.backends.mps.is_available():
+#             return torch.device("mps")
+#         else:
+#             return torch.device("cpu")
+#     else:
+#         raise ValueError(f"Unknown device option: {preferred}")
+import torch
+
 def get_device(cfg):
-    preferred = cfg.experiment.get("device", "auto").lower()
-    if preferred == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    elif preferred == "mps" and torch.backends.mps.is_available():
-        return torch.device("mps")
-    elif preferred == "cpu":
-        return torch.device("cpu")
-    elif preferred == "auto":
+    """
+    Determines and returns the appropriate PyTorch device based on configuration.
+
+    Args:
+        cfg (omegaconf.DictConfig): The Hydra configuration object, expected to have
+                                    cfg.experiment.device.
+
+    Returns:
+        torch.device: The selected PyTorch device.
+
+    Raises:
+        ValueError: If an unknown device option is specified in the configuration.
+    """
+    preferred_device_str = cfg.experiment.get("device", "auto").lower()
+    
+    print(f"\n--- Device Selection ---")
+    print(f"Preferred device from config: '{preferred_device_str}'")
+
+    if preferred_device_str == "cuda":
         if torch.cuda.is_available():
+            print(f"CUDA is available. Using CUDA device.")
             return torch.device("cuda")
-        elif torch.backends.mps.is_available():
+        else:
+            print(f"WARNING: CUDA was preferred but is not available. Falling back to CPU.")
+            return torch.device("cpu")
+    
+    elif preferred_device_str == "mps":
+        if torch.backends.mps.is_available():
+            print(f"MPS (Metal Performance Shaders) is available. Using MPS device.")
             return torch.device("mps")
         else:
+            print(f"WARNING: MPS was preferred but is not available. Falling back to CPU.")
             return torch.device("cpu")
+            
+    elif preferred_device_str == "cpu":
+        print(f"CPU was explicitly preferred. Using CPU device.")
+        return torch.device("cpu")
+        
+    elif preferred_device_str == "auto":
+        print(f"Device set to 'auto'. Checking for best available device...")
+        if torch.cuda.is_available():
+            print(f"  CUDA is available. Selecting CUDA device.")
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            print(f"  MPS (Metal Performance Shaders) is available. Selecting MPS device.")
+            return torch.device("mps")
+        else:
+            print(f"  Neither CUDA nor MPS available. Falling back to CPU.")
+            return torch.device("cpu")
+    
     else:
-        raise ValueError(f"Unknown device option: {preferred}")
+        error_msg = f"ERROR: Unknown device option specified: '{preferred_device_str}'. Valid options are 'auto', 'cuda', 'mps', 'cpu'."
+        print(error_msg)
+        raise ValueError(error_msg)

@@ -16,3 +16,4 @@ torchvision==0.22.0
 tqdm==4.67.1
 transformers
 codecarbon
+memory_profiler

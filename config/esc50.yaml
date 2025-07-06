@@ -23,7 +23,7 @@ experiment:
     hidden_sizes: [640, 320]
     learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243
-    epochs: 1
+    epochs: 100
     early_stopping:
       patience: 19
       delta: 0.01
@@ -33,12 +33,17 @@ experiment:
     factor: 0.6156433661410728
   
   router:
+    num_experts: 4
+    top_k: 2
     hidden_dim: 128 
     drop_prob: 0.2
     epochs: 150
     lr: 2e-3
     batch_size: 256
     weight_decay: 1e-4
+    load_balancing_enabled: true
+    load_balancing_alpha: 10e-2
+    lr_moe_train: 1e-3
 
   cross_validation:
     n_splits: 5

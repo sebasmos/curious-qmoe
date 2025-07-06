@@ -2,13 +2,22 @@
 """
 K-Fold CV on embedding CSVs with CodeCarbon energy tracking
 
-python moe_load_balancing.py \
-  --config-path /Users/sebasmos/Desktop/QWave/config \
-  --config-name esc50 \
-  experiment.datasets.esc.normalization_type=l2 \
-  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-  experiment.device=mps \
-  experiment.metadata.tag=delete_gemini
+CUDA_VISIBLE_DEVICES=1 python moe_deeprouter.py \
+    --config-path /home/sebastian/codes/repo_clean/QWave/config \
+    --config-name esc50 \
+    experiment.datasets.esc.normalization_type=standard \
+    experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.device=cuda \
+    experiment.metadata.tag=moe_deeprouter
+
+# mac:
+python moe_vanilla.py \
+    --config-path /Users/sebasmos/Desktop/QWave/config \
+    --config-name esc50 \
+    experiment.datasets.esc.normalization_type=l2 \
+    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.device=mps \
+    experiment.metadata.tag=delete
 """
 
 from pathlib import Path
@@ -16,6 +25,7 @@ import os, sys
 ROOT = Path(__file__).resolve().parents[2]
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
+
 import os, sys, json, warnings
 from pathlib import Path
 import numpy as np
@@ -33,24 +43,43 @@ from memory_profiler import memory_usage
 from QWave.datasets import EmbeddingAdaptDataset
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel, reset_weights
+import time # Import the time module
+from QWave.utils import get_device
 
+# --- NEW ROUTER CLASS ---
 class Router(nn.Module):
-    def __init__(self, input_dim, num_experts):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, drop_prob: float = 0.2):
         super().__init__()
-        self.linear = nn.Linear(input_dim, num_experts)
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(drop_prob),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, output_dim)
+        )
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
 
-    def forward(self, x):
-        return self.linear(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
 
 class MoEModel(nn.Module):
-    def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
+    def __init__(self, cfg, in_dim, num_classes):
         super().__init__()
         # Initialize router && experts
-        self.router = Router(in_dim, num_experts)
-        self.experts = nn.ModuleList([ESCModel(in_dim,num_classes, hidden_sizes=cfg.experiment.model.hidden_sizes,dropout_prob=cfg.experiment.model.dropout_prob) for _ in range(num_experts)])
+        self.num_experts = cfg.experiment.router.num_experts
+        # Updated Router initialization
+        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, self.num_experts, cfg.experiment.router.dropout_prob)
+        self.experts = nn.ModuleList([ESCModel(in_dim,num_classes, 
+                                               hidden_sizes=cfg.experiment.model.hidden_sizes, 
+                                               dropout_prob=cfg.experiment.model.dropout_prob) 
+                                    for _ in range(self.num_experts)])
         self.num_classes = num_classes
-        self.num_experts = num_experts
-        self.top_k = top_k
+        self.top_k = cfg.experiment.router.top_k
+
 
     def forward(self, x):
         # 1. Router scores and probabilities
@@ -68,54 +97,93 @@ class MoEModel(nn.Module):
                 expert_out = self.experts[idx](x[i].unsqueeze(0)).squeeze(0)
                 out_sum += weight * expert_out
             outputs[i] = out_sum / self.top_k
-
         return outputs, router_probs
 
-def train_moe_local(cfg, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+class MoEModelBatched(nn.Module):
+    def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
+        super().__init__()
+        # Updated Router initialization
+        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.model.dropout_prob)
+        self.experts = nn.ModuleList([
+            ESCModel(in_dim, num_classes, 
+                     hidden_sizes=cfg.experiment.model.hidden_sizes, 
+                     dropout_prob=cfg.experiment.model.dropout_prob)
+            for _ in range(num_experts)
+        ])
+        self.num_classes = num_classes
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.load_balancing_alpha = cfg.experiment.model.get("load_balancing_alpha", 10e-3)
+        self.load_balancing_enabled = cfg.experiment.model.get("load_balancing_enabled", True)
+
+    def forward(self, x):
+        B = x.size(0)
+        
+        router_scores = self.router(x)                      
+        router_probs = F.softmax(router_scores, dim=1)    
+
+        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)  
+
+        outputs = torch.zeros(B, self.num_classes, device=x.device)
+
+        load_balancing_loss = 0.0 
+
+        if self.training and self.load_balancing_enabled: 
+            load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
+
+        for expert_idx in range(self.num_experts):
+            mask = (topk_indices == expert_idx)  
+
+            if not mask.any():
+                continue
+
+            example_indices, slot_indices = torch.nonzero(mask, as_tuple=True)
+
+            x_selected = x[example_indices]  
+            weight_selected = topk_vals[example_indices, slot_indices]  
+
+            expert_output = self.experts[expert_idx](x_selected)  
+
+            outputs[example_indices] += expert_output * weight_selected.unsqueeze(1)
+
+        outputs /= self.top_k  
+        return outputs, router_probs, load_balancing_loss
+    
+
+def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     best_f1 = 0
+    load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
+    
     train_losses, val_losses = [], []
-    # ADDED: Coefficient for the load balancing loss. This is a tunable hyperparameter.
-    load_balancing_alpha = 1e-2
 
     for epoch in range(cfg.experiment.model.epochs):
         model.train()
         total_loss = 0
-        for embeddings, labels  in train_loader:
+        for embeddings, labels in train_loader:
             X, y = embeddings.to(device), labels.to(device)
-
-            # CHANGED: Capture router_probs from the model output.
-            outputs, router_probs = model(X)
-            
-            # Calculate the primary classification loss.
-            classification_loss = criterion(outputs, y)
-
-            # --- START: Added Load Balancing Loss ---
-            # Calculate the average probability for each expert across the batch. This represents the expert "load".
-            avg_expert_load = torch.mean(router_probs, dim=0)
-            
-            # Calculate the load balancing loss. Using the squared sum of average loads encourages them to be equal.
-            load_balancing_loss = torch.sum(avg_expert_load**2)
-            
-            # Combine the classification loss with the scaled load balancing loss.
-            loss = classification_loss + load_balancing_alpha * load_balancing_loss
-            # --- END: Added Load Balancing Loss ---
-            
+            if load_balancing:
+                outputs, router_probs, load_balancing_loss_term = model(X) # Unpack load_balancing_loss_term
+                # Calculate the primary classification loss.
+                classification_loss = criterion(outputs, y)
+                # Combine the classification loss with the scaled load balancing loss.
+                loss = classification_loss + load_balancing_alpha * load_balancing_loss_term                  
+            else:
+                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
+                loss = criterion(outputs, y)# classification loss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            # CHANGED: Track the combined total loss.
             total_loss += loss.item()
         train_losses.append(total_loss)
 
         model.eval()
         all_preds, all_labels = [], []
         with torch.no_grad():
-            for embeddings, labels  in val_loader:
+            for embeddings, labels in val_loader:
                 X, y = embeddings.to(device), labels.to(device)
-                outputs, _ = model(X)
+                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
                 all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
         f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
@@ -134,7 +202,7 @@ def _validate_moe_epoch(model, val_loader, criterion, device):
     with torch.no_grad():
         for embeddings, labels in val_loader:
             X, y = embeddings.to(device), labels.to(device)
-            outputs, _ = model(X)
+            outputs, _, _ = model(X) # Ensure model returns 3 values
             all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
             all_labels.extend(y.cpu().numpy())
             all_probs.extend(F.softmax(outputs, dim=1).cpu().numpy())
@@ -159,6 +227,7 @@ def main(cfg: DictConfig):
     df = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
     skf = StratifiedKFold(n_splits=cfg.experiment.cross_validation.n_splits, shuffle=True, random_state=42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device(cfg)
     tag = cfg.experiment.metadata.tag
     out_dir = Path("outputs") / tag
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -167,6 +236,8 @@ def main(cfg: DictConfig):
     all_max_ram_mb_train, all_max_ram_mb_val = [], []
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
+    all_training_durations = [] # New list to store training durations
+    all_validation_durations = [] # New list to store validation durations
     fold_metrics = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
@@ -187,28 +258,54 @@ def main(cfg: DictConfig):
 
         in_dim = train_ds.features.shape[1]
         num_classes = len(np.unique(labels))
-        model = MoEModel(cfg,in_dim, num_classes).to(device)
+        # Ensure that MoEModelBatched is used here if load_balancing is true
+        if cfg.experiment.get("load_balancing", True):
+            model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
+        else:
+            # Fallback to the simpler MoEModel if load_balancing is disabled and you don't want the extra returns
+            # However, for consistency with train_moe_local, it's better to use MoEModelBatched
+            # and just ignore the load_balancing_loss if cfg.experiment.get("load_balancing", True) is False
+            model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
+
+
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
+        # --- Training Phase Timing ---
+        train_start_time = time.perf_counter()
         train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
         train_tracker.start()
-
+        load_balancing = cfg.experiment.get("load_balancing", True)# set as True by default
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
-            memory_usage((train_moe_local, (cfg, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
-
-        max_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
+            memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
+        train_end_time = time.perf_counter()
+        training_duration = train_end_time - train_start_time
+        print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
+        all_training_durations.append(training_duration)
+        max_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
+
 
         val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(fold_dir), output_file="emissions_val.csv")
         val_tracker.start()
 
-        final_model = MoEModel(cfg, in_dim, num_classes).to(device)
+        # The model used here should also be MoEModelBatched for consistency if that's what's being trained
+        final_model = MoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
-        mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
 
-        max_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
+        # --- Validation Phase Timing ---
+        val_start_time = time.perf_counter()
+
+        mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
+        
+        val_end_time = time.perf_counter()
+        
+        validation_duration = val_end_time - val_start_time
+        print(f"Manual Timer: Validation for Fold {fold+1} took {validation_duration:.2f} seconds.")
         val_tracker.stop()
+        
+        all_validation_durations.append(validation_duration)
+        max_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
 
         train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
         val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
@@ -221,7 +318,9 @@ def main(cfg: DictConfig):
             "best_f1": final_f1_weighted,
             "accuracy": final_accuracy,
             "max_ram_mb_train": float(max_ram_mb_train),
-            "max_ram_mb_val": float(max_ram_mb_val)
+            "max_ram_mb_val": float(max_ram_mb_val),
+            "training_duration_seconds": float(training_duration),  # Add training duration
+            "validation_duration_seconds": float(validation_duration) # Add validation duration
         }
 
         for k in cc_metrics_to_track:
@@ -248,6 +347,10 @@ def main(cfg: DictConfig):
         "f1_std": float(np.std(all_final_f1_scores)),
         "accuracy_mean": float(np.mean(all_final_accuracy_scores)),
         "accuracy_std": float(np.std(all_final_accuracy_scores)),
+        "training_duration_mean_seconds": float(np.mean(all_training_durations)), # Add mean training duration
+        "training_duration_std_seconds": float(np.std(all_training_durations)),   # Add std training duration
+        "validation_duration_mean_seconds": float(np.mean(all_validation_durations)), # Add mean validation duration
+        "validation_duration_std_seconds": float(np.std(all_validation_durations)),   # Add std validation duration
         "metadata": dict(cfg.experiment.metadata),
         "folds": fold_metrics
     }
