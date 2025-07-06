@@ -41,15 +41,17 @@ experiment:
     hidden_dim: 128 
     dropout_prob: 0.2
     epochs: 150
-    lr: 2e-3
+    lr_moe_train: 1e-3
     batch_size: 256
     weight_decay: 1e-4
+    load_balancing: true
     load_balancing_alpha: 1e-3
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
     diversity_loss_alpha: 1e-3  # New parameter for diversity loss
+    # List of bit-widths for each expert
+    # expert_quantizations: [1, 1, 1, 1]
+    expert_quantizations: [1, 2, 4, 16]
     
-    lr_moe_train: 1e-3
-
   cross_validation:
     n_splits: 5
     shuffle: true

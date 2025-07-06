@@ -1,15 +1,16 @@
 # 
 # #!/usr/bin/env python
 """
-K-Fold Mixture-of-Experts Fast: Same moe.py but without early stopping - this version achieves higher results due to better params
 
-CUDA_VISIBLE_DEVICES=1 python moe_raw.py \
+K-Fold Mixture-of-Experts Fast: Only selected expert gets backpropagated
+
+CUDA_VISIBLE_DEVICES=1 python moefast.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
     experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cuda \
-    experiment.metadata.tag=moe_deeprouter_raw
+    experiment.metadata.tag=moefast
 
 # mac:
 python moe_vanilla.py \
@@ -47,14 +48,13 @@ from QWave.models import ESCModel, reset_weights
 import time # Import the time module
 from QWave.utils import get_device
 
-
 class Router(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, drop_prob: float = 0.2):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout_prob: float = 0.2):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(drop_prob),
+            nn.Dropout(dropout_prob),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, output_dim)
@@ -66,39 +66,7 @@ class Router(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-
-class MoEModel(nn.Module):
-    def __init__(self, cfg, in_dim, num_classes):
-        super().__init__()
-        # Initialize router && experts
-        self.num_experts = cfg.experiment.router.num_experts
-        # Updated Router initialization
-        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, self.num_experts, cfg.experiment.router.dropout_prob)
-        self.experts = nn.ModuleList([ESCModel(in_dim,num_classes, 
-                                               hidden_sizes=cfg.experiment.model.hidden_sizes, 
-                                               dropout_prob=cfg.experiment.model.dropout_prob) 
-                                    for _ in range(self.num_experts)])
-        self.num_classes = num_classes
-        self.top_k = cfg.experiment.router.top_k
-
-
-    def forward(self, x):
-        # 1. Router scores and probabilities
-        router_scores = self.router(x)
-        router_probs = F.softmax(router_scores, dim=1)
-        # 2. Select top-k experts based on router probabilities
-        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)
-        # 3. Compute outputs from selected experts
-        outputs = torch.zeros(x.size(0), self.num_classes, device=x.device)
-        for i in range(x.size(0)):
-            out_sum = 0
-            for k in range(self.top_k):
-                idx = topk_indices[i, k].item()
-                weight = topk_vals[i, k].item()
-                expert_out = self.experts[idx](x[i].unsqueeze(0)).squeeze(0)
-                out_sum += weight * expert_out
-            outputs[i] = out_sum / self.top_k
-        return outputs, router_probs
+        
 
 class MoEModelBatched(nn.Module):
     def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
@@ -114,8 +82,7 @@ class MoEModelBatched(nn.Module):
         self.num_classes = num_classes
         self.num_experts = num_experts
         self.top_k = top_k
-        self.load_balancing_alpha = cfg.experiment.model.get("load_balancing_alpha", 10e-3)
-        self.load_balancing_enabled = cfg.experiment.model.get("load_balancing_enabled", True)
+        self.load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
 
     def forward(self, x):
         B = x.size(0)
@@ -129,7 +96,7 @@ class MoEModelBatched(nn.Module):
 
         load_balancing_loss = 0.0 
 
-        if self.training and self.load_balancing_enabled: 
+        if self.training: 
             load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
 
         for expert_idx in range(self.num_experts):
@@ -150,13 +117,22 @@ class MoEModelBatched(nn.Module):
         outputs /= self.top_k  
         return outputs, router_probs, load_balancing_loss
     
-
-def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
+def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    best_f1 = 0
-    load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
     
+    best_accuracy = 0.0
+    patience_counter = 0
+    best_state = None
+
+    early_stopping_config = cfg.experiment.router.get("early_stopping")
+    early_stopping_enabled = early_stopping_config is not None
+
+    if early_stopping_enabled:
+        patience = early_stopping_config.patience
+        delta = early_stopping_config.delta
+        print(f"Early stopping enabled with patience={patience} and delta={delta}")
+
     train_losses, val_losses = [], []
 
     for epoch in range(cfg.experiment.model.epochs):
@@ -165,14 +141,12 @@ def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_w
         for embeddings, labels in train_loader:
             X, y = embeddings.to(device), labels.to(device)
             if load_balancing:
-                outputs, router_probs, load_balancing_loss_term = model(X) # Unpack load_balancing_loss_term
-                # Calculate the primary classification loss.
+                outputs, router_probs, load_balancing_loss_term = model(X)
                 classification_loss = criterion(outputs, y)
-                # Combine the classification loss with the scaled load balancing loss.
-                loss = classification_loss + load_balancing_alpha * load_balancing_loss_term                  
+                loss = classification_loss + cfg.experiment.router.load_balancing_alpha * load_balancing_loss_term
             else:
-                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
-                loss = criterion(outputs, y)# classification loss
+                outputs, _, _ = model(X)
+                loss = criterion(outputs, y)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -184,16 +158,40 @@ def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_w
         with torch.no_grad():
             for embeddings, labels in val_loader:
                 X, y = embeddings.to(device), labels.to(device)
-                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
+                outputs, _, _ = model(X)
                 all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
+        
+        accuracy = accuracy_score(all_labels, all_preds)
         f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-        print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val F1: {f1:.4f}")
-        val_losses.append(f1)
-        if f1 > best_f1:
-            best_f1 = f1
+        
+        print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val Accuracy: {accuracy:.4f}, Val F1: {f1:.4f}")
+        
+        val_losses.append(f1) 
+
+        if f1 > best_accuracy + (delta if early_stopping_enabled else 0):
+            best_accuracy = f1
+            print(f"  -> Validation f1 improved to {best_accuracy:.4f}. Saving model.")
             torch.save(model.state_dict(), ckpt_path)
-            best_state = (model.state_dict(), train_losses, val_losses, best_f1, all_labels, all_preds, [])
+            best_state = (model.state_dict(), train_losses, val_losses, best_accuracy, all_labels, all_preds, [])
+            if early_stopping_enabled:
+                patience_counter = 0  # Reset patience counter
+        else:
+            if early_stopping_enabled:
+                patience_counter += 1
+                print(f"  -> No improvement for {patience_counter} epoch(s). Patience is {patience}.")
+
+        # Trigger early stopping if patience is exceeded
+        if early_stopping_enabled and patience_counter >= patience:
+            print(f"\nEARLY STOPPING: Validation accuracy has not improved by >{delta} for {patience} epochs.")
+            break
+        
+    # Ensure best_state is not None if training runs for only one epoch or never improves
+    if best_state is None:
+        # Save the last state if no improvement was ever made
+        print("No improvement observed; saving final model state.")
+        torch.save(model.state_dict(), ckpt_path)
+        best_state = (model.state_dict(), train_losses, val_losses, accuracy, all_labels, all_preds, [])
 
     return best_state
 
@@ -235,11 +233,11 @@ def main(cfg: DictConfig):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] # Renamed for clarity with average
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] 
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
-    all_training_durations = [] # New list to store training durations
-    all_validation_durations = [] # New list to store validation durations
+    all_training_durations = [] 
+    all_validation_durations = [] 
     fold_metrics = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
@@ -250,7 +248,7 @@ def main(cfg: DictConfig):
         df_train = df.iloc[train_idx].reset_index(drop=True)
         df_val = df.iloc[val_idx].reset_index(drop=True)
 
-        normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw")
+        normalization_type = cfg.experiment.datasets.esc.normalization_type
         train_ds = EmbeddingAdaptDataset(df_train, normalization_type=normalization_type, scaler=None)
         fitted_scaler = train_ds.get_scaler()
         val_ds = EmbeddingAdaptDataset(df_val, normalization_type=normalization_type, scaler=fitted_scaler)
@@ -270,18 +268,17 @@ def main(cfg: DictConfig):
         train_start_time = time.perf_counter()
         train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
         train_tracker.start()
-        load_balancing = cfg.experiment.get("load_balancing", True)# set as True by default
+        load_balancing = cfg.experiment.router.load_balancing
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
             memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
-        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) # Kept as average
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) 
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
         all_training_durations.append(training_duration)
         
 
-        # --- Clear CUDA cache between training and validation ---
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("CUDA cache emptied after training.")
@@ -289,7 +286,6 @@ def main(cfg: DictConfig):
         val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(fold_dir), output_file="emissions_val.csv")
         val_tracker.start()
 
-        # The model used here should also be MoEModelBatched for consistency if that's what's being trained
         final_model = MoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
 

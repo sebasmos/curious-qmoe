@@ -1,16 +1,14 @@
-# 
-# #!/usr/bin/env python
+#!/usr/bin/env python
 """
+K-Fold Mixture-of-Experts Fast 
 
-K-Fold Mixture-of-Experts Fast: Only selected expert gets backpropagated
-
-CUDA_VISIBLE_DEVICES=1 python moe.py \
+CUDA_VISIBLE_DEVICES=1 python qmoe_automated.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
     experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cuda \
-    experiment.metadata.tag=moe_deeprouter
+    experiment.metadata.tag=qmoe_1111
 
 # mac:
 python moe_vanilla.py \
@@ -48,14 +46,85 @@ from QWave.models import ESCModel, reset_weights
 import time # Import the time module
 from QWave.utils import get_device
 
-# --- NEW ROUTER CLASS ---
+
+class BitLinear(nn.Module):
+    """
+    A BitLinear layer that handles various bit-widths (XX) and
+    correctly implements BitNet's quantization and stabilization principles.
+    """
+    def __init__(self, in_features, out_features, num_bits=16):
+        super(BitLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_bits = num_bits
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        nn.init.xavier_uniform_(self.weight)
+
+    def forward(self, x):
+        # The 16-bit expert operates like a standard Linear layer.
+        if self.num_bits >= 16:
+            return F.linear(x, self.weight)
+
+        # --- Activation Quantization (8-bit absmax) ---
+        # Applied to all quantized experts (1, 2, 4-bit)
+        scale = 127.0 / x.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-5)
+        x_quant = (x * scale).round().clamp(-128, 127) / scale
+        
+        # STE for activations
+        x_final = x + (x_quant - x).detach()
+
+        # --- Weight Quantization (absmean) ---
+        # Center weights before quantization
+        w_centered = self.weight - self.weight.mean()
+        
+        # 1-bit (Ternary: -1, 0, 1)
+        if self.num_bits == 1:
+            w_quant = torch.sign(w_centered)
+        # 2-bit and 4-bit (Symmetric)
+        else:
+            q_min = -2.**(self.num_bits - 1)
+            q_max = 2.**(self.num_bits - 1) - 1
+            w_scale = w_centered.abs().max() / q_max
+            w_quant = torch.round(w_centered / w_scale.clamp(min=1e-5)).clamp(q_min, q_max)
+            w_quant = w_quant * w_scale
+
+        # STE for weights
+        w_final = w_quant + (self.weight - self.weight).detach()
+
+        # --- Linear Operation ---
+        return F.linear(x_final, w_final)
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.weight)
+
+# ### NEW: Expert model using BitLinear and LayerNorm for stability ###
+class BitNetExpert(nn.Module):
+    """An expert model using the corrected BitLinear layers and LayerNorm."""
+    def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob, num_bits=16):
+        super().__init__()
+        layers = []
+        last_dim = in_dim
+        for hidden_dim in hidden_sizes:
+            layers.append(BitLinear(last_dim, hidden_dim, num_bits=num_bits))
+            # LayerNorm is crucial for stabilizing quantized networks
+            layers.append(nn.LayerNorm(hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_prob))
+            last_dim = hidden_dim
+        layers.append(BitLinear(last_dim, num_classes, num_bits=num_bits))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+
 class Router(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, drop_prob: float = 0.2):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout_prob: float = 0.2):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(drop_prob),
+            nn.Dropout(dropout_prob),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, output_dim)
@@ -67,22 +136,29 @@ class Router(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+        
 
-class MoEModelBatched(nn.Module):
+class qMoEModelBatched(nn.Module):
     def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
         super().__init__()
-        # Updated Router initialization
         self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.model.dropout_prob)
+        
+        expert_quantizations = cfg.experiment.router.expert_quantizations
+        print(f"Initializing experts with quantizations: {expert_quantizations}")
+
         self.experts = nn.ModuleList([
-            ESCModel(in_dim, num_classes, 
-                     hidden_sizes=cfg.experiment.model.hidden_sizes, 
-                     dropout_prob=cfg.experiment.model.dropout_prob)
-            for _ in range(num_experts)
+            BitNetExpert(in_dim, num_classes,
+                         hidden_sizes=cfg.experiment.model.hidden_sizes,
+                         dropout_prob=cfg.experiment.model.dropout_prob,
+                         num_bits=bit_width)
+            for bit_width in expert_quantizations
         ])
+        
         self.num_classes = num_classes
         self.num_experts = num_experts
         self.top_k = top_k
-        self.load_balancing_alpha = cfg.experiment.model.get("load_balancing_alpha", 10e-3)
+        self.load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
+        
 
     def forward(self, x):
         B = x.size(0)
@@ -116,25 +192,23 @@ class MoEModelBatched(nn.Module):
 
         outputs /= self.top_k  
         return outputs, router_probs, load_balancing_loss
-    
+
+
 def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     
-    # --- MODIFIED: Early Stopping Setup ---
     best_accuracy = 0.0
     patience_counter = 0
     best_state = None
 
-    # Load early stopping config from YAML, if it exists
     early_stopping_config = cfg.experiment.router.get("early_stopping")
     early_stopping_enabled = early_stopping_config is not None
 
     if early_stopping_enabled:
-        patience = early_stopping_config.get("patience", 10)
-        delta = early_stopping_config.get("delta", 0.0)
+        patience = early_stopping_config.patience
+        delta = early_stopping_config.delta
         print(f"Early stopping enabled with patience={patience} and delta={delta}")
-    # --- END MODIFICATION ---
 
     train_losses, val_losses = [], []
 
@@ -165,19 +239,16 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
                 all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
         
-        # --- MODIFIED: Switched to accuracy for monitoring and added early stopping logic ---
         accuracy = accuracy_score(all_labels, all_preds)
         f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
         
         print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val Accuracy: {accuracy:.4f}, Val F1: {f1:.4f}")
         
-        # val_losses is used for plotting, can store F1 or another metric
         val_losses.append(f1) 
 
-        # Check for improvement based on accuracy
         if f1 > best_accuracy + (delta if early_stopping_enabled else 0):
             best_accuracy = f1
-            print(f"  -> Validation accuracy improved to {best_accuracy:.4f}. Saving model.")
+            print(f"  -> Validation f1 improved to {best_accuracy:.4f}. Saving model.")
             torch.save(model.state_dict(), ckpt_path)
             best_state = (model.state_dict(), train_losses, val_losses, best_accuracy, all_labels, all_preds, [])
             if early_stopping_enabled:
@@ -191,7 +262,6 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
         if early_stopping_enabled and patience_counter >= patience:
             print(f"\nEARLY STOPPING: Validation accuracy has not improved by >{delta} for {patience} epochs.")
             break
-        # --- END MODIFICATION ---
         
     # Ensure best_state is not None if training runs for only one epoch or never improves
     if best_state is None:
@@ -201,52 +271,6 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
         best_state = (model.state_dict(), train_losses, val_losses, accuracy, all_labels, all_preds, [])
 
     return best_state
-
-# def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
-#     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
-#     criterion = nn.CrossEntropyLoss(weight=class_weights)
-#     best_f1 = 0
-#     load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
-    
-#     train_losses, val_losses = [], []
-
-#     for epoch in range(cfg.experiment.model.epochs):
-#         model.train()
-#         total_loss = 0
-#         for embeddings, labels in train_loader:
-#             X, y = embeddings.to(device), labels.to(device)
-#             if load_balancing:
-#                 outputs, router_probs, load_balancing_loss_term = model(X) # Unpack load_balancing_loss_term
-#                 # Calculate the primary classification loss.
-#                 classification_loss = criterion(outputs, y)
-#                 # Combine the classification loss with the scaled load balancing loss.
-#                 loss = classification_loss + load_balancing_alpha * load_balancing_loss_term                  
-#             else:
-#                 outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
-#                 loss = criterion(outputs, y)# classification loss
-#             optimizer.zero_grad()
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-#         train_losses.append(total_loss)
-
-#         model.eval()
-#         all_preds, all_labels = [], []
-#         with torch.no_grad():
-#             for embeddings, labels in val_loader:
-#                 X, y = embeddings.to(device), labels.to(device)
-#                 outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
-#                 all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
-#                 all_labels.extend(y.cpu().numpy())
-#         f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-#         print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val F1: {f1:.4f}")
-#         val_losses.append(f1)
-#         if f1 > best_f1:
-#             best_f1 = f1
-#             torch.save(model.state_dict(), ckpt_path)
-#             best_state = (model.state_dict(), train_losses, val_losses, best_f1, all_labels, all_preds, [])
-
-#     return best_state
 
 def _validate_moe_epoch(model, val_loader, criterion, device):
     model.eval()
@@ -286,11 +310,11 @@ def main(cfg: DictConfig):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] # Renamed for clarity with average
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] 
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
-    all_training_durations = [] # New list to store training durations
-    all_validation_durations = [] # New list to store validation durations
+    all_training_durations = [] 
+    all_validation_durations = [] 
     fold_metrics = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
@@ -301,7 +325,7 @@ def main(cfg: DictConfig):
         df_train = df.iloc[train_idx].reset_index(drop=True)
         df_val = df.iloc[val_idx].reset_index(drop=True)
 
-        normalization_type = cfg.experiment.datasets.esc.get("normalization_type", "raw")
+        normalization_type = cfg.experiment.datasets.esc.normalization_type
         train_ds = EmbeddingAdaptDataset(df_train, normalization_type=normalization_type, scaler=None)
         fitted_scaler = train_ds.get_scaler()
         val_ds = EmbeddingAdaptDataset(df_val, normalization_type=normalization_type, scaler=fitted_scaler)
@@ -311,7 +335,9 @@ def main(cfg: DictConfig):
 
         in_dim = train_ds.features.shape[1]
         num_classes = len(np.unique(labels))
-        model = MoEModelBatched(cfg, in_dim, num_classes).to(device)
+        
+        model = qMoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
+        
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
@@ -319,18 +345,17 @@ def main(cfg: DictConfig):
         train_start_time = time.perf_counter()
         train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
         train_tracker.start()
-        load_balancing = cfg.experiment.get("load_balancing", True)# set as True by default
+        load_balancing = cfg.experiment.router.load_balancing
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
             memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
-        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) # Kept as average
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) 
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
         all_training_durations.append(training_duration)
         
 
-        # --- Clear CUDA cache between training and validation ---
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("CUDA cache emptied after training.")
@@ -338,7 +363,7 @@ def main(cfg: DictConfig):
         val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(fold_dir), output_file="emissions_val.csv")
         val_tracker.start()
 
-        final_model = MoEModelBatched(cfg,in_dim, num_classes).to(device)
+        final_model = qMoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
 
         # --- Validation Phase Timing ---

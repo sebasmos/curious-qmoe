@@ -427,6 +427,5 @@ def main(cfg: DictConfig):
         json.dump(trial.params, f, indent=4)
     print(f"Best parameters saved to {best_params_path}")
 
-
 if __name__ == "__main__":
     main()
