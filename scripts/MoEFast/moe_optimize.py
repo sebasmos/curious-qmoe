@@ -1,24 +1,13 @@
-# 
-# #!/usr/bin/env python
 """
-K-Fold CV on embedding CSVs with CodeCarbon energy tracking
+K-Fold Mixture-of-Experts Fast Grid: GridSearch
 
-CUDA_VISIBLE_DEVICES=1 python moe.py \
+CUDA_VISIBLE_DEVICES=1 python moe_optimize.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
     experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cuda \
-    experiment.metadata.tag=moe_deeprouter
-
-# mac:
-python moe_vanilla.py \
-    --config-path /Users/sebasmos/Desktop/QWave/config \
-    --config-name esc50 \
-    experiment.datasets.esc.normalization_type=l2 \
-    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-    experiment.device=mps \
-    experiment.metadata.tag=delete
+    experiment.metadata.tag=moe_optimize
 """
 
 from pathlib import Path
@@ -32,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score
 import torch
@@ -42,12 +31,14 @@ from torch.utils.data import DataLoader
 from codecarbon import EmissionsTracker
 from memory_profiler import memory_usage
 from QWave.datasets import EmbeddingAdaptDataset
-from QWave.graphics import plot_multiclass_roc_curve, plot_losses
-from QWave.models import ESCModel, reset_weights
-import time # Import the time module
+from QWave.models import ESCModel
+import time
+
 from QWave.utils import get_device
 
-# --- NEW ROUTER CLASS ---
+import optuna
+from optuna.samplers import TPESampler
+
 class Router(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, drop_prob: float = 0.2):
         super().__init__()
@@ -67,133 +58,108 @@ class Router(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
-class MoEModel(nn.Module):
-    def __init__(self, cfg, in_dim, num_classes):
-        super().__init__()
-        # Initialize router && experts
-        self.num_experts = cfg.experiment.router.num_experts
-        # Updated Router initialization
-        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, self.num_experts, cfg.experiment.router.dropout_prob)
-        self.experts = nn.ModuleList([ESCModel(in_dim,num_classes, 
-                                               hidden_sizes=cfg.experiment.model.hidden_sizes, 
-                                               dropout_prob=cfg.experiment.model.dropout_prob) 
-                                    for _ in range(self.num_experts)])
-        self.num_classes = num_classes
-        self.top_k = cfg.experiment.router.top_k
-
-
-    def forward(self, x):
-        # 1. Router scores and probabilities
-        router_scores = self.router(x)
-        router_probs = F.softmax(router_scores, dim=1)
-        # 2. Select top-k experts based on router probabilities
-        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)
-        # 3. Compute outputs from selected experts
-        outputs = torch.zeros(x.size(0), self.num_classes, device=x.device)
-        for i in range(x.size(0)):
-            out_sum = 0
-            for k in range(self.top_k):
-                idx = topk_indices[i, k].item()
-                weight = topk_vals[i, k].item()
-                expert_out = self.experts[idx](x[i].unsqueeze(0)).squeeze(0)
-                out_sum += weight * expert_out
-            outputs[i] = out_sum / self.top_k
-        return outputs, router_probs
-
 class MoEModelBatched(nn.Module):
-    def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
+    def __init__(self, cfg, in_dim, num_classes, num_experts, top_k):
         super().__init__()
-        # Updated Router initialization
-        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.model.dropout_prob)
+        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.router.dropout_prob)
         self.experts = nn.ModuleList([
-            ESCModel(in_dim, num_classes, 
-                     hidden_sizes=cfg.experiment.model.hidden_sizes, 
+            ESCModel(in_dim, num_classes,
+                     hidden_sizes=cfg.experiment.model.hidden_sizes,
                      dropout_prob=cfg.experiment.model.dropout_prob)
             for _ in range(num_experts)
         ])
         self.num_classes = num_classes
         self.num_experts = num_experts
         self.top_k = top_k
-        self.load_balancing_alpha = cfg.experiment.model.get("load_balancing_alpha", 10e-3)
-        self.load_balancing_enabled = cfg.experiment.model.get("load_balancing_enabled", True)
+        self.load_balancing_alpha = cfg.experiment.router.get("load_balancing_alpha", 10e-3)
+        self.load_balancing_enabled = cfg.experiment.router.get("load_balancing_enabled", True)
 
     def forward(self, x):
         B = x.size(0)
-        
-        router_scores = self.router(x)                      
-        router_probs = F.softmax(router_scores, dim=1)    
 
-        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)  
+        router_scores = self.router(x)
+        router_probs = F.softmax(router_scores, dim=1)
+
+        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)
 
         outputs = torch.zeros(B, self.num_classes, device=x.device)
 
-        load_balancing_loss = 0.0 
+        load_balancing_loss = 0.0
 
-        if self.training and self.load_balancing_enabled: 
+        if self.training and self.load_balancing_enabled:
             load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
 
         for expert_idx in range(self.num_experts):
-            mask = (topk_indices == expert_idx)  
+            mask = (topk_indices == expert_idx)
 
             if not mask.any():
                 continue
 
             example_indices, slot_indices = torch.nonzero(mask, as_tuple=True)
 
-            x_selected = x[example_indices]  
-            weight_selected = topk_vals[example_indices, slot_indices]  
+            x_selected = x[example_indices]
+            weight_selected = topk_vals[example_indices, slot_indices]
 
-            expert_output = self.experts[expert_idx](x_selected)  
+            expert_output = self.experts[expert_idx](x_selected)
 
             outputs[example_indices] += expert_output * weight_selected.unsqueeze(1)
 
-        outputs /= self.top_k  
+        outputs /= self.top_k
         return outputs, router_probs, load_balancing_loss
-    
 
-def train_moe_local(cfg,load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
+def train_moe_local(cfg, model, train_loader, val_loader, class_weights, in_dim, device, ckpt_path, trial: optuna.Trial = None):
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     best_f1 = 0
     load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
-    
-    train_losses, val_losses = [], []
+    load_balancing_enabled = cfg.experiment.router.load_balancing_enabled
+
+    train_losses, val_f1_scores = [], []
+    best_state = None
 
     for epoch in range(cfg.experiment.model.epochs):
         model.train()
         total_loss = 0
         for embeddings, labels in train_loader:
             X, y = embeddings.to(device), labels.to(device)
-            if load_balancing:
-                outputs, router_probs, load_balancing_loss_term = model(X) # Unpack load_balancing_loss_term
-                # Calculate the primary classification loss.
-                classification_loss = criterion(outputs, y)
-                # Combine the classification loss with the scaled load balancing loss.
-                loss = classification_loss + load_balancing_alpha * load_balancing_loss_term                  
-            else:
-                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
-                loss = criterion(outputs, y)# classification loss
+            outputs, router_probs, load_balancing_loss_term = model(X)
+            classification_loss = criterion(outputs, y)
+
+            loss = classification_loss
+            if load_balancing_enabled:
+                loss += load_balancing_alpha * load_balancing_loss_term
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-        train_losses.append(total_loss)
+        train_losses.append(total_loss / len(train_loader))
 
         model.eval()
         all_preds, all_labels = [], []
         with torch.no_grad():
             for embeddings, labels in val_loader:
                 X, y = embeddings.to(device), labels.to(device)
-                outputs, _, _ = model(X) # Ensure model returns 3 values even if load_balancing is off, or adjust the model call
+                outputs, _, _ = model(X)
                 all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
         f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-        print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val F1: {f1:.4f}")
-        val_losses.append(f1)
+        print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss/len(train_loader):.4f}, Val F1: {f1:.4f}")
+        val_f1_scores.append(f1)
+
+        if trial:
+            trial.report(f1, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
         if f1 > best_f1:
             best_f1 = f1
-            torch.save(model.state_dict(), ckpt_path)
-            best_state = (model.state_dict(), train_losses, val_losses, best_f1, all_labels, all_preds, [])
+            best_state = (model.state_dict(), train_losses, val_f1_scores, best_f1, all_labels, all_preds, [])
+        elif best_state is None:
+             best_state = (model.state_dict(), train_losses, val_f1_scores, f1, all_labels, all_preds, [])
+
+    if best_state is None:
+        best_state = (model.state_dict(), train_losses, val_f1_scores, f1, all_labels, all_preds, [])
 
     return best_state
 
@@ -203,7 +169,7 @@ def _validate_moe_epoch(model, val_loader, criterion, device):
     with torch.no_grad():
         for embeddings, labels in val_loader:
             X, y = embeddings.to(device), labels.to(device)
-            outputs, _, _ = model(X) # Ensure model returns 3 values
+            outputs, _, _ = model(X)
             all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
             all_labels.extend(y.cpu().numpy())
             all_probs.extend(F.softmax(outputs, dim=1).cpu().numpy())
@@ -221,31 +187,25 @@ cc_metrics_to_track = [
     "cpu_count", "cpu_model", "gpu_count", "gpu_model", "ram_total_size"
 ]
 
-@hydra.main(version_base=None, config_path="config", config_name="esc50")
-def main(cfg: DictConfig):
+def run_experiment(cfg: DictConfig, trial: optuna.Trial = None):
+
     df_full = pd.read_csv(cfg.experiment.datasets.esc.csv)
     labels = df_full["class_id"].values
     df = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
     skf = StratifiedKFold(n_splits=cfg.experiment.cross_validation.n_splits, shuffle=True, random_state=42)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device = get_device(cfg)
     print(f"Final selected device: {device}\n")
     tag = cfg.experiment.metadata.tag
-    out_dir = Path("outputs") / tag
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] # Renamed for clarity with average
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], []
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
-    all_training_durations = [] # New list to store training durations
-    all_validation_durations = [] # New list to store validation durations
-    fold_metrics = []
+    all_training_durations = []
+    all_validation_durations = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
         print(f"\n--- FOLD {fold+1}/{skf.n_splits} ---")
-        fold_dir = out_dir / f"fold_{fold}"
-        fold_dir.mkdir(exist_ok=True)
 
         df_train = df.iloc[train_idx].reset_index(drop=True)
         df_val = df.iloc[val_idx].reset_index(drop=True)
@@ -255,60 +215,76 @@ def main(cfg: DictConfig):
         fitted_scaler = train_ds.get_scaler()
         val_ds = EmbeddingAdaptDataset(df_val, normalization_type=normalization_type, scaler=fitted_scaler)
 
-        train_ld = DataLoader(train_ds, batch_size=16, shuffle=True)
-        val_ld = DataLoader(val_ds, batch_size=16, shuffle=False)
+        train_ld = DataLoader(train_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
+        val_ld = DataLoader(val_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
         in_dim = train_ds.features.shape[1]
         num_classes = len(np.unique(labels))
-        
-        model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
-        
-        class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
-        ckpt_path = fold_dir / "best_model.pth"
 
-        # --- Training Phase Timing ---
+        model = MoEModelBatched(
+            cfg,
+            in_dim,
+            num_classes,
+            num_experts=cfg.experiment.router.num_experts,
+            top_k=cfg.experiment.router.top_k
+        ).to(device)
+
+        class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
+        
+        ckpt_path = Path("dummy_best_model.pth") 
+
         train_start_time = time.perf_counter()
-        train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
+        
+        temp_output_dir = Path("temp_emissions_data")
+        temp_output_dir.mkdir(exist_ok=True) 
+
+        train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(temp_output_dir), output_file="emissions_train.csv")
         train_tracker.start()
-        load_balancing = cfg.experiment.get("load_balancing", True)# set as True by default
-        mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
-            memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
+
+        mem_train_usage, best_state = \
+            memory_usage((train_moe_local, (cfg, model, train_ld, val_ld, class_weights, in_dim, device, ckpt_path, trial)), interval=0.1, retval=True)
+
+        state_dict, train_losses, val_f1_scores_history, best_f1_train_phase, all_labels_best, all_preds_best, _ = best_state
+
         train_tracker.stop()
-        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) # Kept as average
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
         all_training_durations.append(training_duration)
-        
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
 
-        # --- Clear CUDA cache between training and validation ---
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("CUDA cache emptied after training.")
 
-        val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(fold_dir), output_file="emissions_val.csv")
+        val_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_val", output_dir=str(temp_output_dir), output_file="emissions_val.csv")
         val_tracker.start()
 
-        # The model used here should also be MoEModelBatched for consistency if that's what's being trained
-        final_model = MoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
-        final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        final_model = MoEModelBatched(
+            cfg,
+            in_dim,
+            num_classes,
+            num_experts=cfg.experiment.router.num_experts,
+            top_k=cfg.experiment.router.top_k
+        ).to(device)
+        
+        final_model.load_state_dict(state_dict) 
 
-        # --- Validation Phase Timing ---
         val_start_time = time.perf_counter()
 
         mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
-        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage) # Kept as average
+
         val_end_time = time.perf_counter()
-        
+
         validation_duration = val_end_time - val_start_time
         print(f"Manual Timer: Validation for Fold {fold+1} took {validation_duration:.2f} seconds.")
         val_tracker.stop()
-        
-        all_validation_durations.append(validation_duration)
-        
 
-        train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
-        val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
+        all_validation_durations.append(validation_duration)
+        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
+
+        train_stats = _load_cc_csv(temp_output_dir / "emissions_train.csv")
+        val_stats = _load_cc_csv(temp_output_dir / "emissions_val.csv")
         final_accuracy = accuracy_score(all_labels_final, all_preds_final)
         final_f1_weighted = f1_score(all_labels_final, all_preds_final, average="weighted", zero_division=0)
 
@@ -317,10 +293,10 @@ def main(cfg: DictConfig):
         fold_result = {
             "best_f1": final_f1_weighted,
             "accuracy": final_accuracy,
-            "avg_ram_mb_train": float(avg_ram_mb_train), # Using avg
-            "avg_ram_mb_val": float(avg_ram_mb_val),     # Using avg
-            "training_duration_seconds": float(training_duration),  # Add training duration
-            "validation_duration_seconds": float(validation_duration) # Add validation duration
+            "avg_ram_mb_train": float(avg_ram_mb_train),
+            "avg_ram_mb_val": float(avg_ram_mb_val),
+            "training_duration_seconds": float(training_duration),
+            "validation_duration_seconds": float(validation_duration)
         }
 
         for k in cc_metrics_to_track:
@@ -332,27 +308,19 @@ def main(cfg: DictConfig):
 
         all_final_f1_scores.append(final_f1_weighted)
         all_final_accuracy_scores.append(final_accuracy)
-        all_avg_ram_mb_train.append(avg_ram_mb_train) # Using avg
-        all_avg_ram_mb_val.append(avg_ram_mb_val)     # Using avg
-
-        plot_multiclass_roc_curve(all_labels_final, all_probs_final, EXPERIMENT_NAME=str(fold_dir))
-        plot_losses(train_losses, val_losses, str(fold_dir))
-
-        with open(fold_dir / "metrics.json", "w") as f:
-            json.dump(fold_result, f, indent=4)
-        fold_metrics.append(fold_result)
+        all_avg_ram_mb_train.append(avg_ram_mb_train)
+        all_avg_ram_mb_val.append(avg_ram_mb_val)
 
     summary = {
         "f1_mean": float(np.mean(all_final_f1_scores)),
         "f1_std": float(np.std(all_final_f1_scores)),
         "accuracy_mean": float(np.mean(all_final_accuracy_scores)),
         "accuracy_std": float(np.std(all_final_accuracy_scores)),
-        "training_duration_mean_seconds": float(np.mean(all_training_durations)), # Add mean training duration
-        "training_duration_std_seconds": float(np.std(all_training_durations)),   # Add std training duration
-        "validation_duration_mean_seconds": float(np.mean(all_validation_durations)), # Add mean validation duration
-        "validation_duration_std_seconds": float(np.std(all_validation_durations)),   # Add std validation duration
+        "training_duration_mean_seconds": float(np.mean(all_training_durations)),
+        "training_duration_std_seconds": float(np.std(all_training_durations)),
+        "validation_duration_mean_seconds": float(np.mean(all_validation_durations)),
+        "validation_duration_std_seconds": float(np.std(all_validation_durations)),
         "metadata": dict(cfg.experiment.metadata),
-        "folds": fold_metrics
     }
 
     if all_avg_ram_mb_train:
@@ -375,12 +343,90 @@ def main(cfg: DictConfig):
                     else:
                         summary[f"{prefix}_{k}_all"] = unique_values
 
-    with open(out_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=4)
-
     print("\n== CV SUMMARY ==")
     print(json.dumps(summary, indent=4))
 
-if __name__ == "__main__":
+    return summary["f1_mean"]
+
+def objective(trial: optuna.Trial, base_cfg: DictConfig) -> float:
+    cfg = OmegaConf.create(OmegaConf.to_container(base_cfg, resolve=True))
+
+    cfg.experiment.router.num_experts = trial.suggest_int("num_experts", 2, 20)
+    cfg.experiment.router.top_k = trial.suggest_int("top_k", 1, min(cfg.experiment.router.num_experts, 3))
+    cfg.experiment.router.hidden_dim = trial.suggest_categorical("router_hidden_dim", [64, 128, 256])
+    cfg.experiment.router.dropout_prob = trial.suggest_float("router_dropout_prob", 0.0, 0.4, step=0.1)
+    
+    # Only test with load_balancing_alpha, load_balancing_enabled is fixed to True
+    cfg.experiment.router.load_balancing_enabled = True 
+    cfg.experiment.router.load_balancing_alpha = trial.suggest_loguniform("load_balancing_alpha", 1e-4, 0.1)
+    
+    # Play around with lr as well (assuming this refers to lr_moe_train)
+    cfg.experiment.router.lr_moe_train = trial.suggest_loguniform("lr_moe_train", 1e-5, 1e-2)
+
+    num_expert_hidden_layers = trial.suggest_int("num_expert_hidden_layers", 1, 2)
+    if num_expert_hidden_layers == 1:
+        cfg.experiment.model.hidden_sizes = [trial.suggest_categorical("expert_hidden_dim_1", [128, 256, 512])]
+    elif num_expert_hidden_layers == 2:
+        cfg.experiment.model.hidden_sizes = [
+            trial.suggest_categorical("expert_hidden_dim_2_1", [128, 256]),
+            trial.suggest_categorical("expert_hidden_dim_2_2", [64, 128])
+        ]
+
+    cfg.experiment.model.dropout_prob = trial.suggest_float("expert_dropout_prob", 0.0, 0.4, step=0.1)
+    # Test epochs between 80 and 200
+    cfg.experiment.model.epochs = trial.suggest_int("epochs", 80, 200)
+    cfg.experiment.model.batch_size = trial.suggest_categorical("batch_size", [32, 64])
+
+    # n_splits is fixed to 5
+    cfg.experiment.cross_validation.n_splits = 3
+
+    cfg.experiment.metadata.tag = f"optuna_moe_trial_{trial.number}"
+
+    print(f"\n--- Starting Optuna Trial {trial.number} with parameters: ---")
+    print(OmegaConf.to_yaml(cfg.experiment))
+    print("--------------------------------------------------")
+
+    f1_mean = run_experiment(cfg, trial)
+
+    return f1_mean
+
+@hydra.main(version_base=None, config_path="config", config_name="esc50")
+def main(cfg: DictConfig):
     warnings.filterwarnings("ignore", category=UserWarning)
+
+    study = optuna.create_study(
+        study_name="moe_optimization_deep_router",
+        direction="maximize",
+        sampler=TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner(
+            n_startup_trials=5,
+            n_warmup_steps=5,
+            interval_steps=1,
+        ),
+    )
+
+    n_trials = 150
+
+    try:
+        study.optimize(lambda trial: objective(trial, cfg), n_trials=n_trials, show_progress_bar=True)
+    except KeyboardInterrupt:
+        print("Optimization interrupted by user.")
+
+    print("\n--- Optimization finished. ---")
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    trial = study.best_trial
+
+    print(f"  Value: {trial.value}")
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+    
+    best_params_path = Path("best_moe_params.json")
+    with open(best_params_path, "w") as f:
+        json.dump(trial.params, f, indent=4)
+    print(f"Best parameters saved to {best_params_path}")
+
+
+if __name__ == "__main__":
     main()

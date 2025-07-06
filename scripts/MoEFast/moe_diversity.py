@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-K-Fold CV on embedding CSVs with CodeCarbon energy tracking
+K-Fold Mixture-of-Experts Fast: wrt moe.py involves diversity, however affecting performance despite not using it 
 
 CUDA_VISIBLE_DEVICES=1 python moe_deeprouter.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \

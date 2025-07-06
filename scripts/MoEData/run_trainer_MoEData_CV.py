@@ -2,8 +2,8 @@
 """
 K-Fold Mixture-of-Experts (Multi-class Experts & Router)
 
-Cross-validation version of the MoE pipeline. Keeps the same folder/metrics
-conventions as the original K-Fold CV on embedding CSVs reference.
+Cross-validation version of the MoE pipeline. 
+
 This version uses a two-stage Experts -> Router approach where:
 
 Key points

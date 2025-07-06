@@ -33,16 +33,21 @@ experiment:
     factor: 0.6156433661410728
   
   router:
+    early_stopping:
+      patience: 30
+      delta: 0.001
     num_experts: 4
     top_k: 2
     hidden_dim: 128 
-    drop_prob: 0.2
+    dropout_prob: 0.2
     epochs: 150
     lr: 2e-3
     batch_size: 256
     weight_decay: 1e-4
-    load_balancing_enabled: true
-    load_balancing_alpha: 10e-2
+    load_balancing_alpha: 1e-3
+    diversity_loss_enabled: false  # Default to False, can be enabled in the config
+    diversity_loss_alpha: 1e-3  # New parameter for diversity loss
+    
     lr_moe_train: 1e-3
 
   cross_validation:
