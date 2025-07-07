@@ -2,6 +2,16 @@
 """
 K-Fold CV on embedding CSVs with CodeCarbon energy tracking
 
+
+CUDA_VISIBLE_DEVICES=1 python baseline.py \
+    --config-path /home/sebastian/codes/repo_clean/QWave/config \
+    --config-name esc50 \
+    experiment.datasets.esc.normalization_type=standard \
+    experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.device=cuda \
+    experiment.metadata.tag=Baseline
+
+    
 python Baseline.py \
   --config-path /Users/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
@@ -10,8 +20,6 @@ python Baseline.py \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=mps \
   experiment.metadata.tag=ENet_esc50Baseline_outminl2_raw
-
-
 
   experiment.model.learning_rate=0.001 \
 """
