@@ -35,8 +35,7 @@ from QWave.datasets import EmbeddingAdaptDataset
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel, reset_weights
 import time # Import the time module
-
-# Import get_device from QWave.utils or define it if it's not universally available
+from fvcore.nn import FlopCountAnalysis
 try:
     from QWave.utils import get_device
 except ImportError:
@@ -450,51 +449,20 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
         best_state = (model.state_dict(), train_losses, val_losses, accuracy, all_labels, all_preds, [])
 
     return best_state
-from memory_profiler import memory_usage
+
+# from memory_profiler import memory_usage
 
 def _validate_moe_epoch(model, val_loader, criterion, device):
     model.eval()
     all_preds, all_labels, all_probs = [], [], []
-    total_latency_ms = 0
-    num_samples = 0
-
-    mem_snapshots = []
-
     with torch.no_grad():
         for embeddings, labels in val_loader:
             X, y = embeddings.to(device), labels.to(device)
-
-            def forward_step():
-                outputs, _, _ = model(X)
-
-            mem = memory_usage((forward_step,), interval=0.01, max_iterations=1)
-            mem_snapshots.append(np.mean(mem))
-
-            # Measure latency
-            if device.type == 'cuda':
-                start_event = torch.cuda.Event(enable_timing=True)
-                end_event = torch.cuda.Event(enable_timing=True)
-                start_event.record()
-                outputs, _, _ = model(X)
-                end_event.record()
-                torch.cuda.synchronize()
-                batch_latency_ms = start_event.elapsed_time(end_event)
-            else:
-                start_time = time.perf_counter()
-                outputs, _, _ = model(X)
-                end_time = time.perf_counter()
-                batch_latency_ms = (end_time - start_time) * 1000
-            
-            total_latency_ms += batch_latency_ms
-            num_samples += X.size(0)
-
+            outputs, _, _ = model(X)
             all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
             all_labels.extend(y.cpu().numpy())
             all_probs.extend(F.softmax(outputs, dim=1).cpu().numpy())
-
-    avg_latency_ms_per_sample = (total_latency_ms / num_samples) if num_samples > 0 else 0
-    avg_memory_mb = np.mean(mem_snapshots) if mem_snapshots else 0
-    return 0, 0, all_labels, all_preds, all_probs, avg_latency_ms_per_sample, avg_memory_mb
+    return 0, 0, all_labels, all_preds, all_probs
 
 def _load_cc_csv(csv_path: Path) -> dict:
     if not csv_path.is_file():
@@ -522,12 +490,13 @@ def main(cfg: DictConfig):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] 
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], []
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
-    all_training_durations = [] 
-    all_validation_durations = [] 
-    all_validation_latencies = [] # Store validation latencies per fold
+    all_training_durations = []
+    all_validation_durations = []
+    all_training_flops = [] # Store training FLOPs per fold
+    all_validation_flops = [] # Store validation FLOPs per fold
     fold_metrics = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
@@ -559,6 +528,17 @@ def main(cfg: DictConfig):
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
+        # Calculate FLOPs for training
+        if len(train_ld) > 0:
+            sample_input_train, _ = next(iter(train_ld))
+            sample_input_train = sample_input_train.to(device)
+            flops_train_analyzer = FlopCountAnalysis(model, sample_input_train)
+            training_flops = flops_train_analyzer.total() * cfg.experiment.model.epochs * len(train_ld)
+            print(f"Estimated Training FLOPs for Fold {fold+1}: {training_flops}")
+            all_training_flops.append(training_flops)
+        else:
+            all_training_flops.append(0)
+
         train_start_time = time.perf_counter()
         train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
         train_tracker.start()
@@ -567,7 +547,7 @@ def main(cfg: DictConfig):
             memory_usage((train_moe_local, (cfg, load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         
         train_tracker.stop()
-        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) 
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
@@ -583,24 +563,32 @@ def main(cfg: DictConfig):
         final_model = qMoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
 
+        # Calculate FLOPs for validation
+        if len(val_ld) > 0:
+            sample_input_val, _ = next(iter(val_ld))
+            sample_input_val = sample_input_val.to(device)
+            flops_val_analyzer = FlopCountAnalysis(final_model, sample_input_val)
+            validation_flops = flops_val_analyzer.total() * len(val_ld)
+            print(f"Estimated Validation FLOPs for Fold {fold+1}: {validation_flops}")
+            all_validation_flops.append(validation_flops)
+        else:
+            all_validation_flops.append(0)
+
+
         val_start_time = time.perf_counter()
 
         # Capture latency directly from _validate_moe_epoch
-        # mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final, avg_latency_ms_per_sample) = \
-        #     memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
+        mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
+            memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
         
-        # This already returns clean validation memory usage
-        _, _, all_labels_final, all_preds_final, all_probs_final, avg_latency_ms_per_sample, avg_ram_mb_val = \
-            _validate_moe_epoch(final_model, val_ld, nn.CrossEntropyLoss(), device)
         val_end_time = time.perf_counter()
         validation_duration = val_end_time - val_start_time
+        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
         print(f"Manual Timer: Validation for Fold {fold+1} took {validation_duration:.2f} seconds.")
-        print(f"Average Latency per sample for Fold {fold+1}: {avg_latency_ms_per_sample:.4f} ms")
 
         val_tracker.stop()
         
         all_validation_durations.append(validation_duration)
-        all_validation_latencies.append(avg_latency_ms_per_sample) # Store latency
 
         train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
         val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
@@ -616,8 +604,9 @@ def main(cfg: DictConfig):
             "avg_ram_mb_val": float(avg_ram_mb_val), # Peak memory (RAM) during validation
             "training_duration_seconds": float(training_duration),
             "validation_duration_seconds": float(validation_duration),
-            "average_latency_ms_per_sample": float(avg_latency_ms_per_sample), # Average latency
-            "parameter_count": int(moe_parameter_count) # Parameter count
+            "parameter_count": int(moe_parameter_count), # Parameter count
+            "training_flops": float(training_flops),
+            "validation_flops": float(validation_flops)
         }
 
         for k in cc_metrics_to_track:
@@ -648,9 +637,11 @@ def main(cfg: DictConfig):
         "training_duration_std_seconds": float(np.std(all_training_durations)),
         "validation_duration_mean_seconds": float(np.mean(all_validation_durations)),
         "validation_duration_std_seconds": float(np.std(all_validation_durations)),
-        "average_latency_ms_per_sample_mean": float(np.mean(all_validation_latencies)), # Avg latency mean
-        "average_latency_ms_per_sample_std": float(np.std(all_validation_latencies)),   # Avg latency std
         "parameter_count": int(moe_parameter_count), # Parameter count (same for all folds of this MoE config)
+        "training_flops_mean": float(np.mean(all_training_flops)) if all_training_flops else 0.0,
+        "training_flops_std": float(np.std(all_training_flops)) if all_training_flops else 0.0,
+        "validation_flops_mean": float(np.mean(all_validation_flops)) if all_validation_flops else 0.0,
+        "validation_flops_std": float(np.std(all_validation_flops)) if all_validation_flops else 0.0,
         "metadata": dict(cfg.experiment.metadata),
         "folds": fold_metrics
     }
@@ -680,7 +671,7 @@ def main(cfg: DictConfig):
 
     print("\n== CV SUMMARY ==")
     print(json.dumps(summary, indent=4))
-    # === Create filtered summary CSV ===
+    
     filtered_csv_path = out_dir / "summary_filtered.csv"
     filtered_data = {
         "name": summary.get("metadata", {}).get("tag", "unknown"),
@@ -688,14 +679,15 @@ def main(cfg: DictConfig):
         "accuracy_mean": summary.get("accuracy_mean"),
         "f1_mean": summary.get("f1_mean"),
         "avg_ram_gb_val_mean": summary.get("avg_ram_mb_val_mean", 0.0) / 1024,
-        "average_latency_ms_per_sample_mean": summary.get("average_latency_ms_per_sample_mean"),
         "training_duration_mean_seconds": summary.get("training_duration_mean_seconds"),
         "validation_duration_mean_seconds": summary.get("validation_duration_mean_seconds"),
         "train_energy_consumed_mean": summary.get("train_energy_consumed_mean"),
         "val_energy_consumed_mean": summary.get("val_energy_consumed_mean"),
         "train_emissions_mean": summary.get("train_emissions_mean"),
         "val_emissions_mean": summary.get("val_emissions_mean"),
-        "train_gpu_power_mean": summary.get("train_gpu_power_mean")
+        "train_gpu_power_mean": summary.get("train_gpu_power_mean"),
+        "training_flops_mean": summary.get("training_flops_mean"),
+        "validation_flops_mean": summary.get("validation_flops_mean")
     }
     pd.DataFrame([filtered_data]).to_csv(filtered_csv_path, index=False)
     print(f"\nFiltered summary saved to {filtered_csv_path}")
