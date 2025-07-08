@@ -6,6 +6,11 @@ import numpy as np
 import torch
 import pandas as pd
 import os
+
+def get_num_parameters(model):
+    """Calculates the total number of trainable parameters in a model."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 # def save_predictions(args, model_name, seed, y_test, y_pred, model, metrics):
 def save_predictions(pred_folder, model_name, model, metrics, y_test, y_pred,seed):
     """

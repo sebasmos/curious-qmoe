@@ -33,11 +33,12 @@ experiment:
     factor: 0.6156433661410728
   
   router:
+    variant: qmoe   # or "moe"
     early_stopping:
       patience: 30
       delta: 0.001
     num_experts: 4
-    top_k: 2
+    top_k: 1
     hidden_dim: 128 
     dropout_prob: 0.2
     epochs: 150

@@ -4,13 +4,13 @@
 
 K-Fold Mixture-of-Experts Fast: Only selected expert gets backpropagated
 
-CUDA_VISIBLE_DEVICES=1 python moefast.py \
+CUDA_VISIBLE_DEVICES=1 python moefast_improved.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
     experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cuda \
-    experiment.metadata.tag=moefast
+    experiment.metadata.tag=moefast_improved
 
 # mac:
 python moe_vanilla.py \
@@ -45,28 +45,11 @@ from memory_profiler import memory_usage
 from QWave.datasets import EmbeddingAdaptDataset
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel, reset_weights
+from QWave.moe import Router, train_moe_local, _validate_moe_epoch
+from QWave.utils import get_num_parameters
 import time # Import the time module
 from QWave.utils import get_device
-
-class Router(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout_prob: float = 0.2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout_prob),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, output_dim)
-        )
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-        
+from fvcore.nn import FlopCountAnalysis
 
 class MoEModelBatched(nn.Module):
     def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
@@ -116,96 +99,6 @@ class MoEModelBatched(nn.Module):
 
         outputs /= self.top_k  
         return outputs, router_probs, load_balancing_loss
-    
-def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    
-    best_accuracy = 0.0
-    patience_counter = 0
-    best_state = None
-
-    early_stopping_config = cfg.experiment.router.get("early_stopping")
-    early_stopping_enabled = early_stopping_config is not None
-
-    if early_stopping_enabled:
-        patience = early_stopping_config.patience
-        delta = early_stopping_config.delta
-        print(f"Early stopping enabled with patience={patience} and delta={delta}")
-
-    train_losses, val_losses = [], []
-
-    for epoch in range(cfg.experiment.model.epochs):
-        model.train()
-        total_loss = 0
-        for embeddings, labels in train_loader:
-            X, y = embeddings.to(device), labels.to(device)
-            if load_balancing:
-                outputs, router_probs, load_balancing_loss_term = model(X)
-                classification_loss = criterion(outputs, y)
-                loss = classification_loss + cfg.experiment.router.load_balancing_alpha * load_balancing_loss_term
-            else:
-                outputs, _, _ = model(X)
-                loss = criterion(outputs, y)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-        train_losses.append(total_loss)
-
-        model.eval()
-        all_preds, all_labels = [], []
-        with torch.no_grad():
-            for embeddings, labels in val_loader:
-                X, y = embeddings.to(device), labels.to(device)
-                outputs, _, _ = model(X)
-                all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
-                all_labels.extend(y.cpu().numpy())
-        
-        accuracy = accuracy_score(all_labels, all_preds)
-        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-        
-        print(f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, Train Loss: {total_loss:.4f}, Val Accuracy: {accuracy:.4f}, Val F1: {f1:.4f}")
-        
-        val_losses.append(f1) 
-
-        if f1 > best_accuracy + (delta if early_stopping_enabled else 0):
-            best_accuracy = f1
-            print(f"  -> Validation f1 improved to {best_accuracy:.4f}. Saving model.")
-            torch.save(model.state_dict(), ckpt_path)
-            best_state = (model.state_dict(), train_losses, val_losses, best_accuracy, all_labels, all_preds, [])
-            if early_stopping_enabled:
-                patience_counter = 0  # Reset patience counter
-        else:
-            if early_stopping_enabled:
-                patience_counter += 1
-                print(f"  -> No improvement for {patience_counter} epoch(s). Patience is {patience}.")
-
-        # Trigger early stopping if patience is exceeded
-        if early_stopping_enabled and patience_counter >= patience:
-            print(f"\nEARLY STOPPING: Validation accuracy has not improved by >{delta} for {patience} epochs.")
-            break
-        
-    # Ensure best_state is not None if training runs for only one epoch or never improves
-    if best_state is None:
-        # Save the last state if no improvement was ever made
-        print("No improvement observed; saving final model state.")
-        torch.save(model.state_dict(), ckpt_path)
-        best_state = (model.state_dict(), train_losses, val_losses, accuracy, all_labels, all_preds, [])
-
-    return best_state
-
-def _validate_moe_epoch(model, val_loader, criterion, device):
-    model.eval()
-    all_preds, all_labels, all_probs = [], [], []
-    with torch.no_grad():
-        for embeddings, labels in val_loader:
-            X, y = embeddings.to(device), labels.to(device)
-            outputs, _, _ = model(X) # Ensure model returns 3 values
-            all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
-            all_labels.extend(y.cpu().numpy())
-            all_probs.extend(F.softmax(outputs, dim=1).cpu().numpy())
-    return 0, 0, all_labels, all_preds, all_probs
 
 def _load_cc_csv(csv_path: Path) -> dict:
     if not csv_path.is_file():
@@ -225,7 +118,6 @@ def main(cfg: DictConfig):
     labels = df_full["class_id"].values
     df = df_full.drop(columns=["folder", "name", "label", "category"], errors="ignore")
     skf = StratifiedKFold(n_splits=cfg.experiment.cross_validation.n_splits, shuffle=True, random_state=42)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device = get_device(cfg)
     print(f"Final selected device: {device}\n")
     tag = cfg.experiment.metadata.tag
@@ -233,11 +125,13 @@ def main(cfg: DictConfig):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_final_f1_scores, all_final_accuracy_scores = [], []
-    all_avg_ram_mb_train, all_avg_ram_mb_val = [], [] 
+    all_avg_ram_mb_train, all_avg_ram_mb_val = [], []
     all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
     all_val_cc_data_agg = {k: [] for k in cc_metrics_to_track}
-    all_training_durations = [] 
-    all_validation_durations = [] 
+    all_training_durations = []
+    all_validation_durations = []
+    all_training_flops = [] # Store training FLOPs per fold
+    all_validation_flops = [] # Store validation FLOPs per fold
     fold_metrics = []
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
@@ -253,32 +147,47 @@ def main(cfg: DictConfig):
         fitted_scaler = train_ds.get_scaler()
         val_ds = EmbeddingAdaptDataset(df_val, normalization_type=normalization_type, scaler=fitted_scaler)
 
-        train_ld = DataLoader(train_ds, batch_size=16, shuffle=True)
-        val_ld = DataLoader(val_ds, batch_size=16, shuffle=False)
+        train_ld = DataLoader(train_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
+        val_ld = DataLoader(val_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
         in_dim = train_ds.features.shape[1]
         num_classes = len(np.unique(labels))
         
+        # Instantiate the qMoEModelBatched as per your original request
         model = MoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         
+        # Calculate parameter count for the MoE model
+        moe_parameter_count = get_num_parameters(model)
+        print(f"MoE Model Parameter Count: {moe_parameter_count}")
+
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
-        # --- Training Phase Timing ---
+        # Calculate FLOPs for training
+        if len(train_ld) > 0:
+            sample_input_train, _ = next(iter(train_ld))
+            sample_input_train = sample_input_train.to(device)
+            flops_train_analyzer = FlopCountAnalysis(model, sample_input_train)
+            training_flops = flops_train_analyzer.total() * cfg.experiment.model.epochs * len(train_ld)
+            print(f"Estimated Training FLOPs for Fold {fold+1}: {training_flops}")
+            all_training_flops.append(training_flops)
+        else:
+            all_training_flops.append(0)
+
         train_start_time = time.perf_counter()
         train_tracker = EmissionsTracker(project_name=f"{tag}_fold{fold}_train", output_dir=str(fold_dir), output_file="emissions_train.csv")
         train_tracker.start()
-        load_balancing = cfg.experiment.router.load_balancing
+        load_balancing = cfg.experiment.router.load_balancing # Use load balancing from config
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
-            memory_usage((train_moe_local, (cfg,load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
+            memory_usage((train_moe_local, (cfg, load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
+        
         train_tracker.stop()
-        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage) 
+        avg_ram_mb_train = sum(mem_train_usage) / len(mem_train_usage)
         train_end_time = time.perf_counter()
         training_duration = train_end_time - train_start_time
         print(f"Manual Timer: Training for Fold {fold+1} took {training_duration:.2f} seconds.")
         all_training_durations.append(training_duration)
         
-
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             print("CUDA cache emptied after training.")
@@ -289,19 +198,32 @@ def main(cfg: DictConfig):
         final_model = MoEModelBatched(cfg,in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
         final_model.load_state_dict(torch.load(ckpt_path, map_location=device))
 
-        # --- Validation Phase Timing ---
+        # Calculate FLOPs for validation
+        if len(val_ld) > 0:
+            sample_input_val, _ = next(iter(val_ld))
+            sample_input_val = sample_input_val.to(device)
+            flops_val_analyzer = FlopCountAnalysis(final_model, sample_input_val)
+            validation_flops = flops_val_analyzer.total() * len(val_ld)
+            print(f"Estimated Validation FLOPs for Fold {fold+1}: {validation_flops}")
+            all_validation_flops.append(validation_flops)
+        else:
+            all_validation_flops.append(0)
+
+
         val_start_time = time.perf_counter()
 
-        mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
-        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage) # Kept as average
-        val_end_time = time.perf_counter()
+        # Capture latency directly from _validate_moe_epoch
+        mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
+            memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.1, retval=True)
         
+        val_end_time = time.perf_counter()
         validation_duration = val_end_time - val_start_time
+        avg_ram_mb_val = sum(mem_val_usage) / len(mem_val_usage)
         print(f"Manual Timer: Validation for Fold {fold+1} took {validation_duration:.2f} seconds.")
+
         val_tracker.stop()
         
         all_validation_durations.append(validation_duration)
-        
 
         train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
         val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
@@ -313,10 +235,13 @@ def main(cfg: DictConfig):
         fold_result = {
             "best_f1": final_f1_weighted,
             "accuracy": final_accuracy,
-            "avg_ram_mb_train": float(avg_ram_mb_train), # Using avg
-            "avg_ram_mb_val": float(avg_ram_mb_val),     # Using avg
-            "training_duration_seconds": float(training_duration),  # Add training duration
-            "validation_duration_seconds": float(validation_duration) # Add validation duration
+            "avg_ram_mb_train": float(avg_ram_mb_train),
+            "avg_ram_mb_val": float(avg_ram_mb_val), # Peak memory (RAM) during validation
+            "training_duration_seconds": float(training_duration),
+            "validation_duration_seconds": float(validation_duration),
+            "parameter_count": int(moe_parameter_count), # Parameter count
+            "training_flops": float(training_flops),
+            "validation_flops": float(validation_flops)
         }
 
         for k in cc_metrics_to_track:
@@ -328,8 +253,8 @@ def main(cfg: DictConfig):
 
         all_final_f1_scores.append(final_f1_weighted)
         all_final_accuracy_scores.append(final_accuracy)
-        all_avg_ram_mb_train.append(avg_ram_mb_train) # Using avg
-        all_avg_ram_mb_val.append(avg_ram_mb_val)     # Using avg
+        all_avg_ram_mb_train.append(avg_ram_mb_train)
+        all_avg_ram_mb_val.append(avg_ram_mb_val)
 
         plot_multiclass_roc_curve(all_labels_final, all_probs_final, EXPERIMENT_NAME=str(fold_dir))
         plot_losses(train_losses, val_losses, str(fold_dir))
@@ -343,10 +268,15 @@ def main(cfg: DictConfig):
         "f1_std": float(np.std(all_final_f1_scores)),
         "accuracy_mean": float(np.mean(all_final_accuracy_scores)),
         "accuracy_std": float(np.std(all_final_accuracy_scores)),
-        "training_duration_mean_seconds": float(np.mean(all_training_durations)), # Add mean training duration
-        "training_duration_std_seconds": float(np.std(all_training_durations)),   # Add std training duration
-        "validation_duration_mean_seconds": float(np.mean(all_validation_durations)), # Add mean validation duration
-        "validation_duration_std_seconds": float(np.std(all_validation_durations)),   # Add std validation duration
+        "training_duration_mean_seconds": float(np.mean(all_training_durations)),
+        "training_duration_std_seconds": float(np.std(all_training_durations)),
+        "validation_duration_mean_seconds": float(np.mean(all_validation_durations)),
+        "validation_duration_std_seconds": float(np.std(all_validation_durations)),
+        "parameter_count": int(moe_parameter_count), # Parameter count (same for all folds of this MoE config)
+        "training_flops_mean": float(np.mean(all_training_flops)) if all_training_flops else 0.0,
+        "training_flops_std": float(np.std(all_training_flops)) if all_training_flops else 0.0,
+        "validation_flops_mean": float(np.mean(all_validation_flops)) if all_validation_flops else 0.0,
+        "validation_flops_std": float(np.std(all_validation_flops)) if all_validation_flops else 0.0,
         "metadata": dict(cfg.experiment.metadata),
         "folds": fold_metrics
     }
@@ -355,8 +285,8 @@ def main(cfg: DictConfig):
         summary["avg_ram_mb_train_mean"] = float(np.mean(all_avg_ram_mb_train))
         summary["avg_ram_mb_train_std"] = float(np.std(all_avg_ram_mb_train))
     if all_avg_ram_mb_val:
-        summary["avg_ram_mb_val_mean"] = float(np.mean(all_avg_ram_mb_val))
-        summary["avg_ram_mb_val_std"] = float(np.std(all_avg_ram_mb_val))
+        summary["avg_ram_mb_val_mean"] = float(np.mean(all_avg_ram_mb_val)) # Peak RAM mean
+        summary["avg_ram_mb_val_std"] = float(np.std(all_avg_ram_mb_val))   # Peak RAM std
 
     for phase_data_agg, prefix in [(all_train_cc_data_agg, "train"), (all_val_cc_data_agg, "val")]:
         for k in cc_metrics_to_track:
@@ -376,6 +306,27 @@ def main(cfg: DictConfig):
 
     print("\n== CV SUMMARY ==")
     print(json.dumps(summary, indent=4))
+    
+    filtered_csv_path = out_dir / "summary_filtered.csv"
+    filtered_data = {
+        "name": summary.get("metadata", {}).get("tag", "unknown"),
+        "parameter_count": summary.get("parameter_count"),
+        "accuracy_mean": summary.get("accuracy_mean"),
+        "f1_mean": summary.get("f1_mean"),
+        "avg_ram_gb_val_mean": summary.get("avg_ram_mb_val_mean", 0.0) / 1024,
+        "training_duration_mean_seconds": summary.get("training_duration_mean_seconds"),
+        "validation_duration_mean_seconds": summary.get("validation_duration_mean_seconds"),
+        "train_energy_consumed_mean": summary.get("train_energy_consumed_mean"),
+        "val_energy_consumed_mean": summary.get("val_energy_consumed_mean"),
+        "train_emissions_mean": summary.get("train_emissions_mean"),
+        "val_emissions_mean": summary.get("val_emissions_mean"),
+        "train_gpu_power_mean": summary.get("train_gpu_power_mean"),
+        "val_gpu_power_mean": summary.get("val_gpu_power_mean"),
+        "training_flops_mean": summary.get("training_flops_mean"),
+        "validation_flops_mean": summary.get("validation_flops_mean")
+    }
+    pd.DataFrame([filtered_data]).to_csv(filtered_csv_path, index=False)
+    print(f"\nFiltered summary saved to {filtered_csv_path}")
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=UserWarning)
