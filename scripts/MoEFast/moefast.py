@@ -4,7 +4,7 @@
 
 K-Fold Mixture-of-Experts Fast: Only selected expert gets backpropagated
 
-CUDA_VISIBLE_DEVICES=1 python moefast_improved.py \
+CUDA_VISIBLE_DEVICES=1 python moefast.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \

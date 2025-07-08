@@ -9,7 +9,7 @@ CUDA_VISIBLE_DEVICES=1 python qmoe_last.py \
   experiment.datasets.esc.normalization_type=standard \
   experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cuda \
-  experiment.metadata.tag=test
+  experiment.metadata.tag=qmoe_last
 
 CUDA_VISIBLE_DEVICES=1 python qmoe_last.py \
   --config-path /home/sebastian/codes/repo_clean/QWave/config \

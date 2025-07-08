@@ -9,6 +9,7 @@ hydra:
   output_subdir: null
 
 experiment:
+  models_to_run: [esc]
   device: "mps"  # or "cuda", "mps", or "cpu"
   datasets:
     esc:
@@ -33,7 +34,6 @@ experiment:
     factor: 0.6156433661410728
   
   router:
-    variant: qmoe   # or "moe"
     early_stopping:
       patience: 30
       delta: 0.001
