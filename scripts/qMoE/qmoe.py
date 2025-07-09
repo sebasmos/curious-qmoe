@@ -15,6 +15,16 @@ bitnet158b, bitnet
   CUDA_VISIBLE_DEVICES=1 python qmoe.py \
   --config-path /home/sebastian/codes/repo_clean/QWave/config \
   --config-name esc50 \
+  experiment.router.expert_quantizations=""[qesc,qesc,qesc,qesc]"" \
+  experiment.router.num_experts=4 \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+  experiment.device=cpu \
+  experiment.metadata.tag=q1
+
+  CUDA_VISIBLE_DEVICES=1 python qmoe.py \
+  --config-path /home/sebastian/codes/repo_clean/QWave/config \
+  --config-name esc50 \
   experiment.router.expert_quantizations=""[1,2,4,16]"" \
   experiment.router.num_experts=4 \
   experiment.datasets.esc.normalization_type=standard \
@@ -25,22 +35,13 @@ bitnet158b, bitnet
 CUDA_VISIBLE_DEVICES=1 python qmoe.py \
   --config-path /home/sebastian/codes/repo_clean/QWave/config \
   --config-name esc50 \
-  experiment.router.expert_quantizations=[bitnet,4,8,16] \
-  experiment.router.num_experts=4 \
-  experiment.datasets.esc.normalization_type=standard \
-  experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-  experiment.device=cuda \
-  experiment.metadata.tag=qmoe_p3
-
-  CUDA_VISIBLE_DEVICES=1 python qmoe.py \
-  --config-path /home/sebastian/codes/repo_clean/QWave/config \
-  --config-name esc50 \
-  experiment.router.expert_quantizations=""[qesc,qesc,qesc,qesc]"" \
+  experiment.router.expert_quantizations=[popcount,popcount,popcount,popcount] \
   experiment.router.num_experts=4 \
   experiment.datasets.esc.normalization_type=standard \
   experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
-  experiment.metadata.tag=q1
+  experiment.metadata.tag=p3
+  
 """
 
 from pathlib import Path
@@ -68,9 +69,9 @@ from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel, reset_weights
 from QWave.moe import Router, train_moe_local, _validate_moe_epoch
 from QWave.utils import get_num_parameters
-import time # Import the time module
+import time 
 from QWave.utils import get_device
-from QWave.qmoe_layers import BitNetExpert158b, BitNetExpert, BitwisePopcountLinear, BitNetPopcountExpert, BitwiseLinear
+from QWave.qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert#, calculate_real_and_potential_model_size_mb
 from fvcore.nn import FlopCountAnalysis
 from QWave.memory import print_size_of_model
 
@@ -103,11 +104,12 @@ class qMoEModelBatched(nn.Module):
                 torch.backends.quantized.engine = 'qnnpack'
             elif bit_width == "bitnet158b":
                 print("  -> Creating a BitNet1.58b expert.")
-                experts.append(ESCModel(
+                experts.append(BitNetExpert158b(
                     in_dim,
                     num_classes,
                     hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob
+                    dropout_prob=cfg.experiment.model.dropout_prob,
+                    threshold=0.05
                 ))
             elif bit_width == "bitnet":
                 print("  -> Creating a standard BitNetExpert with ternary mode.")
@@ -136,46 +138,83 @@ class qMoEModelBatched(nn.Module):
                     num_bits=int(bit_width)  # cast to int if needed
                 ))
         self.experts = nn.ModuleList(experts)
-        
+        print(self.experts)
         self.num_classes = num_classes
         self.num_experts = num_experts
         self.top_k = top_k
         self.load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
         
-    def forward(self, x):
+    # def forward(self, x):
 
-        B = x.size(0)
+    #     B = x.size(0)
         
-        router_scores = self.router(x)         
+    #     router_scores = self.router(x)         
 
-        router_probs = F.softmax(router_scores, dim=1)    
+    #     router_probs = F.softmax(router_scores, dim=1)    
 
-        topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)  
+    #     topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)  
 
-        outputs = torch.zeros(B, self.num_classes, device=x.device)
+    #     outputs = torch.zeros(B, self.num_classes, device=x.device)
 
-        load_balancing_loss = 0.0 
+    #     load_balancing_loss = 0.0 
 
-        if self.training: 
-            load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
+    #     if self.training: 
+    #         load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
 
-        for expert_idx in range(self.num_experts):
-            mask = (topk_indices == expert_idx)  
+    #     for expert_idx in range(self.num_experts):
+    #         mask = (topk_indices == expert_idx)  
 
-            if not mask.any():
-                continue
+    #         if not mask.any():
+    #             continue
 
-            example_indices, slot_indices = torch.nonzero(mask, as_tuple=True)
+    #         example_indices, slot_indices = torch.nonzero(mask, as_tuple=True)
 
-            x_selected = x[example_indices]  
-            weight_selected = topk_vals[example_indices, slot_indices]  
+    #         x_selected = x[example_indices]  
+    #         weight_selected = topk_vals[example_indices, slot_indices]  
 
-            expert_output = self.experts[expert_idx](x_selected)  
+    #         expert_output = self.experts[expert_idx](x_selected)  
 
-            outputs[example_indices] += expert_output * weight_selected.unsqueeze(1)
+    #         outputs[example_indices] += expert_output * weight_selected.unsqueeze(1)
 
-        outputs /= self.top_k  
-        return outputs, router_probs, load_balancing_loss
+    #     outputs /= self.top_k  
+    #     return outputs, router_probs, load_balancing_loss
+    def forward(self, x: torch.Tensor):
+        """
+        Vectorised MoE forward pass
+        ---------------------------
+        • Routes each sample to `top_k` experts via soft-max scores  
+        • Batches all rows that go to the **same** expert before the call,
+        making INT8 / GEMM kernels much more efficient.
+        """
+        B = x.size(0)                        # batch size
+        router_p   = F.softmax(self.router(x), dim=1)          # (B, E)
+        k_val, k_idx = torch.topk(router_p, self.top_k, dim=1) # (B, K)
+
+        out = x.new_zeros(B, self.num_classes)  # pre-allocate result
+
+        # load-balancing L2 loss (auxiliary)
+        lb_loss = torch.sum(router_p.mean(0) ** 2) if self.training else 0.0
+
+        # ------------------------------------------------------------------
+        # Vectorised expert dispatch
+        # ------------------------------------------------------------------
+        for e_idx, expert in enumerate(self.experts):
+            rows = (k_idx == e_idx).nonzero(as_tuple=True)[0]  # indices in batch
+            if rows.numel() == 0:
+                continue                   # no sample picked this expert
+
+            # column position inside the top-k list for these rows
+            cols = (k_idx[rows] == e_idx).nonzero(as_tuple=True)[1]
+            weights = k_val[rows, cols]                     # (n_rows,)
+
+            # single expert call on a *batched* tensor
+            logits = expert(x[rows])                        # (n_rows, C)
+
+            # weighted contribution
+            out[rows] += logits * weights.unsqueeze(1)      # broadcast
+
+        out = out / self.top_k            # average over top-k experts
+        return out, router_p, lb_loss
 
 
 def _load_cc_csv(csv_path: Path) -> dict:
@@ -279,7 +318,8 @@ def main(cfg: DictConfig):
         
         # Instantiate the qMoEModelBatched as per your original request
         model = qMoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
-        
+        # print("Expert 0 mode:", model.experts[0].net[0].num_bits) 
+        # print("Expert 1 mode:", model.experts[1].net[0].num_bits) 
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
         ckpt_path = fold_dir / "best_model.pth"
 
@@ -362,16 +402,19 @@ def main(cfg: DictConfig):
                 memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
             dur_val = time.perf_counter() - val_start_time
             model_size = print_size_of_model(final_model, "Quantized model")
+            # model_size = calculate_real_and_potential_model_size_mb(final_model, "Quantized model")
+            
         else: 
             val_start_time = time.perf_counter()
             mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
                 memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
             dur_val = time.perf_counter() - val_start_time
             model_size =  print_size_of_model(final_model, "Model after validation")
+            # model_size = calculate_real_and_potential_model_size_mb(final_model, "Quantized model")
         
         # This already uses np.max, which is good.
         max_ram_mb_val = float(np.max(mem_val_usage)) if mem_val_usage else 0.0
-            
+        print("Model size: ", model_size)
         val_tracker.stop()
         
         all_validation_durations.append(dur_val)

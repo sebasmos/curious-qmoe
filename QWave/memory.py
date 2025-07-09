@@ -3,7 +3,9 @@ import os
 import psutil
 import torch
 
-    
+from pathlib import Path
+import os, torch
+
 def print_size_of_model(model, label=""):
     torch.save(model.state_dict(), "temp.p")
     size=os.path.getsize("temp.p")
