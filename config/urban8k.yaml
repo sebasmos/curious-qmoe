@@ -1,0 +1,46 @@
+# configs.yaml
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+hydra:
+  run:
+    dir: ./outputs/${experiment.metadata.tag}
+  output_subdir: null
+
+experiment:
+  device: "mps"  # or "cuda", "mps", or "cpu"
+  datasets:
+    esc:
+      csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
+      # csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      # imgs: /home/sebastian/codes/data/ESC-50-master/Mels_folds_dataset
+
+  model:
+    batch_size: 64
+    hidden_sizes: [640, 320]
+    learning_rate: 0.0005793146438537801
+    dropout_prob:  0.1953403862875243
+    epochs: 81
+    early_stopping:
+      patience: 19
+      delta: 0.01
+    weight_decay: 0.0051275736171219844
+    label_smoothing: 0.10851194368924916
+    patience: 15
+    factor: 0.6156433661410728
+
+  cross_validation:
+    n_splits: 5
+    shuffle: true
+    random_seed: 42
+
+  logging:
+    log_interval: 50
+    save_checkpoint: true
+    resume: true
+
+  metadata:
+    tag: "EfficientNet_esc50_imgs_1536"
+    notes: ""
