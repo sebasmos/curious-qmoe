@@ -61,7 +61,7 @@ from torch.utils.data import DataLoader
 from fvcore.nn import FlopCountAnalysis
 from memory_profiler import memory_usage
 from codecarbon import EmissionsTracker
-
+import platform
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 
@@ -290,7 +290,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
             print_size_of_model(final_model, "Original_Model")
             if model_kind == "qesc":
 
-                if torch.backends.quantized.engine != 'fbgemm':
+                # if torch.backends.quantized.engine != 'fbgemm':
+                #     torch.backends.quantized.engine = 'fbgemm'
+                if platform.system() == "Darwin":  # macOS
+                    torch.backends.quantized.engine = 'qnnpack'
+                else:
                     torch.backends.quantized.engine = 'fbgemm'
                 qmodel = torch.quantization.quantize_dynamic(final_model, {nn.Linear}, dtype=torch.qint8)
                 val_start_time = time.perf_counter()
