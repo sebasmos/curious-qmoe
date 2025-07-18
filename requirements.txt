@@ -17,3 +17,4 @@ tqdm==4.67.1
 transformers
 codecarbon
 memory_profiler
+fvcore

@@ -25,10 +25,10 @@ CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
     experiment.metadata.tag=benchmark_baselines
 
 CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
-    --config-path /home/sebastian/codes/repo_clean/QWave/config \
+    --config-path /Users/sebasmos/Desktop/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
-    experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cpu \
     experiment.models_to_run="[esc,qesc,bitnet,'1','2','4','8','16']" \
     experiment.metadata.tag=benchmark_baselines
@@ -45,7 +45,6 @@ python benchmark_baselines.py \
 
 from __future__ import annotations
 
-# ─── Imports & repo bootstrap ───────────────────────────────────────────────
 from pathlib import Path
 import os, sys, json, time, warnings
 
