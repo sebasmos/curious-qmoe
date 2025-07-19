@@ -3,6 +3,116 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 import torch.nn.functional as F
+from .models import ESCModel, reset_weights
+from .qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert
+
+class qMoEModelBatched(nn.Module):
+    def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
+        super().__init__()
+        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.model.dropout_prob)
+        
+        expert_quantizations = cfg.experiment.router.expert_quantizations
+        print(f"Initializing experts with quantizations: {expert_quantizations}")
+
+        experts = []
+        for bit_width in expert_quantizations:
+            if bit_width == "esc":
+                print("  -> Creating a ESC expert.")
+                experts.append(ESCModel(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob
+                ))
+            elif bit_width == "qesc":
+                print("  -> Creating a qESC expert.")
+                experts.append(ESCModel(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob
+                ))
+                torch.backends.quantized.engine = 'qnnpack'
+            elif bit_width == "bitnet158b":
+                print("  -> Creating a BitNet1.58b expert.")
+                experts.append(BitNetExpert158b(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob,
+                    threshold=0.05
+                ))
+            elif bit_width == "bitnet":
+                print("  -> Creating a standard BitNetExpert with ternary mode.")
+                experts.append(BitNetExpert(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob,
+                    num_bits="bitnet"
+                ))
+            elif bit_width == "popcount": # Added popcount expert type
+                print("  -> Creating a BitNetPopcountExpert.")
+                experts.append(BitNetPopcountExpert(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob
+                ))
+            else:
+                print(f"  -> Creating a standard BitNetExpert with num_bits={bit_width}.")
+                experts.append(BitNetExpert(
+                    in_dim,
+                    num_classes,
+                    hidden_sizes=cfg.experiment.model.hidden_sizes,
+                    dropout_prob=cfg.experiment.model.dropout_prob,
+                    num_bits=int(bit_width)  # cast to int if needed
+                ))
+        self.experts = nn.ModuleList(experts)
+        print(self.experts)
+        self.num_classes = num_classes
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
+        
+    def forward(self, x: torch.Tensor):
+        """
+        Vectorised MoE forward pass
+        ---------------------------
+        • Routes each sample to `top_k` experts via soft-max scores  
+        • Batches all rows that go to the **same** expert before the call,
+        making INT8 / GEMM kernels much more efficient.
+        """
+        B = x.size(0)                        # batch size
+        router_p   = F.softmax(self.router(x), dim=1)          # (B, E)
+        k_val, k_idx = torch.topk(router_p, self.top_k, dim=1) # (B, K)
+
+        out = x.new_zeros(B, self.num_classes)  # pre-allocate result
+
+        # load-balancing L2 loss (auxiliary)
+        lb_loss = torch.sum(router_p.mean(0) ** 2) if self.training else 0.0
+
+        # ------------------------------------------------------------------
+        # Vectorised expert dispatch
+        # ------------------------------------------------------------------
+        for e_idx, expert in enumerate(self.experts):
+            rows = (k_idx == e_idx).nonzero(as_tuple=True)[0]  # indices in batch
+            if rows.numel() == 0:
+                continue                   # no sample picked this expert
+
+            # column position inside the top-k list for these rows
+            cols = (k_idx[rows] == e_idx).nonzero(as_tuple=True)[1]
+            weights = k_val[rows, cols]                     # (n_rows,)
+
+            # single expert call on a *batched* tensor
+            logits = expert(x[rows])                        # (n_rows, C)
+
+            # weighted contribution
+            out[rows] += logits * weights.unsqueeze(1)      # broadcast
+
+        out = out / self.top_k            # average over top-k experts
+        return out, router_p, lb_loss
+
 
 class Router(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout_prob: float = 0.2):

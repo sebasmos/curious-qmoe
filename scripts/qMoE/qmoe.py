@@ -55,12 +55,12 @@ python qmoe.py \
 python qmoe.py \
   --config-path /Users/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
-  "experiment.router.expert_quantizations=[qesc,qesc,qesc,qesc]" \
-  experiment.router.num_experts=4 \
+  "experiment.router.expert_quantizations=[qesc,qesc,qesc,qesc,qesc,qesc,qesc,qesc,qesc,qesc]" \
+  experiment.router.num_experts=10 \
   experiment.datasets.esc.normalization_type=standard \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
-  experiment.metadata.tag=q1
+  experiment.metadata.tag=q2
 """
 
 from pathlib import Path
@@ -79,163 +79,18 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from codecarbon import EmissionsTracker
 from memory_profiler import memory_usage
 from QWave.datasets import EmbeddingAdaptDataset
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
-from QWave.models import ESCModel, reset_weights
-from QWave.moe import Router, train_moe_local, _validate_moe_epoch
-from QWave.utils import get_num_parameters
-import time 
-from QWave.utils import get_device
-from QWave.qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert#, calculate_real_and_potential_model_size_mb
-from fvcore.nn import FlopCountAnalysis
+from QWave.models import ESCModel
+from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
+from QWave.utils import get_num_parameters, get_device
 from QWave.memory import print_size_of_model
 import platform
-
-class qMoEModelBatched(nn.Module):
-    def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
-        super().__init__()
-        self.router = Router(in_dim, cfg.experiment.router.hidden_dim, num_experts, cfg.experiment.model.dropout_prob)
-        
-        expert_quantizations = cfg.experiment.router.expert_quantizations
-        print(f"Initializing experts with quantizations: {expert_quantizations}")
-
-        experts = []
-        for bit_width in expert_quantizations:
-            if bit_width == "esc":
-                print("  -> Creating a ESC expert.")
-                experts.append(ESCModel(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob
-                ))
-            elif bit_width == "qesc":
-                print("  -> Creating a qESC expert.")
-                experts.append(ESCModel(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob
-                ))
-                torch.backends.quantized.engine = 'qnnpack'
-            elif bit_width == "bitnet158b":
-                print("  -> Creating a BitNet1.58b expert.")
-                experts.append(BitNetExpert158b(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob,
-                    threshold=0.05
-                ))
-            elif bit_width == "bitnet":
-                print("  -> Creating a standard BitNetExpert with ternary mode.")
-                experts.append(BitNetExpert(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob,
-                    num_bits="bitnet"
-                ))
-            elif bit_width == "popcount": # Added popcount expert type
-                print("  -> Creating a BitNetPopcountExpert.")
-                experts.append(BitNetPopcountExpert(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob
-                ))
-            else:
-                print(f"  -> Creating a standard BitNetExpert with num_bits={bit_width}.")
-                experts.append(BitNetExpert(
-                    in_dim,
-                    num_classes,
-                    hidden_sizes=cfg.experiment.model.hidden_sizes,
-                    dropout_prob=cfg.experiment.model.dropout_prob,
-                    num_bits=int(bit_width)  # cast to int if needed
-                ))
-        self.experts = nn.ModuleList(experts)
-        print(self.experts)
-        self.num_classes = num_classes
-        self.num_experts = num_experts
-        self.top_k = top_k
-        self.load_balancing_alpha = cfg.experiment.router.load_balancing_alpha
-        
-    # def forward(self, x):
-
-    #     B = x.size(0)
-        
-    #     router_scores = self.router(x)         
-
-    #     router_probs = F.softmax(router_scores, dim=1)    
-
-    #     topk_vals, topk_indices = torch.topk(router_probs, self.top_k, dim=1)  
-
-    #     outputs = torch.zeros(B, self.num_classes, device=x.device)
-
-    #     load_balancing_loss = 0.0 
-
-    #     if self.training: 
-    #         load_balancing_loss = torch.sum(torch.mean(router_probs, dim=0) ** 2)
-
-    #     for expert_idx in range(self.num_experts):
-    #         mask = (topk_indices == expert_idx)  
-
-    #         if not mask.any():
-    #             continue
-
-    #         example_indices, slot_indices = torch.nonzero(mask, as_tuple=True)
-
-    #         x_selected = x[example_indices]  
-    #         weight_selected = topk_vals[example_indices, slot_indices]  
-
-    #         expert_output = self.experts[expert_idx](x_selected)  
-
-    #         outputs[example_indices] += expert_output * weight_selected.unsqueeze(1)
-
-    #     outputs /= self.top_k  
-    #     return outputs, router_probs, load_balancing_loss
-    def forward(self, x: torch.Tensor):
-        """
-        Vectorised MoE forward pass
-        ---------------------------
-        • Routes each sample to `top_k` experts via soft-max scores  
-        • Batches all rows that go to the **same** expert before the call,
-        making INT8 / GEMM kernels much more efficient.
-        """
-        B = x.size(0)                        # batch size
-        router_p   = F.softmax(self.router(x), dim=1)          # (B, E)
-        k_val, k_idx = torch.topk(router_p, self.top_k, dim=1) # (B, K)
-
-        out = x.new_zeros(B, self.num_classes)  # pre-allocate result
-
-        # load-balancing L2 loss (auxiliary)
-        lb_loss = torch.sum(router_p.mean(0) ** 2) if self.training else 0.0
-
-        # ------------------------------------------------------------------
-        # Vectorised expert dispatch
-        # ------------------------------------------------------------------
-        for e_idx, expert in enumerate(self.experts):
-            rows = (k_idx == e_idx).nonzero(as_tuple=True)[0]  # indices in batch
-            if rows.numel() == 0:
-                continue                   # no sample picked this expert
-
-            # column position inside the top-k list for these rows
-            cols = (k_idx[rows] == e_idx).nonzero(as_tuple=True)[1]
-            weights = k_val[rows, cols]                     # (n_rows,)
-
-            # single expert call on a *batched* tensor
-            logits = expert(x[rows])                        # (n_rows, C)
-
-            # weighted contribution
-            out[rows] += logits * weights.unsqueeze(1)      # broadcast
-
-        out = out / self.top_k            # average over top-k experts
-        return out, router_p, lb_loss
-
+import time 
+from fvcore.nn import FlopCountAnalysis
 
 def _load_cc_csv(csv_path: Path) -> dict:
     if not csv_path.is_file():
@@ -398,7 +253,6 @@ def main(cfg: DictConfig):
                 memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
             dur_val = time.perf_counter() - val_start_time
             model_size = print_size_of_model(final_model, "Quantized model")
-            # model_size = calculate_real_and_potential_model_size_mb(final_model, "Quantized model")
             
         else: 
             val_start_time = time.perf_counter()
@@ -406,9 +260,7 @@ def main(cfg: DictConfig):
                 memory_usage((_validate_moe_epoch, (final_model, val_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
             dur_val = time.perf_counter() - val_start_time
             model_size =  print_size_of_model(final_model, "Model after validation")
-            # model_size = calculate_real_and_potential_model_size_mb(final_model, "Quantized model")
         
-        # This already uses np.max, which is good.
         max_ram_mb_val = float(np.max(mem_val_usage)) if mem_val_usage else 0.0
         print("Model size: ", model_size)
         val_tracker.stop()

@@ -296,6 +296,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                     torch.backends.quantized.engine = 'qnnpack'
                 else:
                     torch.backends.quantized.engine = 'fbgemm'
+                print(torch.backends.quantized.engine)
                 qmodel = torch.quantization.quantize_dynamic(final_model, {nn.Linear}, dtype=torch.qint8)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
