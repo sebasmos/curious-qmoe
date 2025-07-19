@@ -72,7 +72,7 @@ os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 from QWave.datasets import EmbeddingAdaptDataset
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel
-from QWave.memory import print_size_of_model
+from QWave.memory import print_size_of_model, _load_cc_csv
 from QWave.utils import get_device, get_num_parameters
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b
@@ -124,14 +124,6 @@ cc_metrics_to_track = [
     "cpu_energy", "gpu_energy", "ram_energy", "energy_consumed",
     "cpu_count", "cpu_model", "gpu_count", "gpu_model", "ram_total_size",
 ]
-
-def _load_cc_csv(path: Path):
-    if not path.is_file():
-        return {}
-    df = pd.read_csv(path)
-    if not df.empty:
-        return df.iloc[-1].to_dict()
-    return {}
 
 
 

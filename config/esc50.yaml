@@ -53,7 +53,6 @@ experiment:
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     
-    
   cross_validation:
     n_splits: 5
     shuffle: true

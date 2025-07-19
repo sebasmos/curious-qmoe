@@ -61,6 +61,16 @@ python qmoe.py \
   experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
   experiment.metadata.tag=q2
+
+python qmoe.py \
+  --config-path /Users/sebasmos/Desktop/QWave/config \
+  --config-name esc50 \
+  "experiment.router.expert_quantizations=[1,2,4,16]"\
+  experiment.router.num_experts=4 \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+  experiment.device=cpu \
+  experiment.metadata.tag=p2
 """
 
 from pathlib import Path
@@ -87,23 +97,17 @@ from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel
 from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
 from QWave.utils import get_num_parameters, get_device
-from QWave.memory import print_size_of_model
+from QWave.memory import print_size_of_model, _load_cc_csv
 import platform
 import time 
 from fvcore.nn import FlopCountAnalysis
 
-def _load_cc_csv(csv_path: Path) -> dict:
-    if not csv_path.is_file():
-        return {}
-    df = pd.read_csv(csv_path)
-    return df.iloc[-1].to_dict() if len(df) else {}
 
 cc_metrics_to_track = [
     "duration", "emissions", "emissions_rate", "cpu_power", "gpu_power", "ram_power",
     "cpu_energy", "gpu_energy", "ram_energy", "energy_consumed",
     "cpu_count", "cpu_model", "gpu_count", "gpu_model", "ram_total_size"
 ]
-
 
 @hydra.main(version_base=None, config_path="config", config_name="esc50")
 def main(cfg: DictConfig):
@@ -140,7 +144,6 @@ def main(cfg: DictConfig):
         return
     num_classes_placeholder = len(np.unique(labels))
     
-    # Create a dummy model instance just to get parameter count before the fold loop
     dummy_model_for_params = qMoEModelBatched(cfg, in_dim_placeholder, num_classes_placeholder, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
     moe_parameter_count = get_num_parameters(dummy_model_for_params)
     print(f"MoE Model Parameter Count: {moe_parameter_count:,}")
@@ -168,6 +171,7 @@ def main(cfg: DictConfig):
         
         # Instantiate the qMoEModelBatched as per your original request
         model = qMoEModelBatched(cfg, in_dim, num_classes, cfg.experiment.router.num_experts, cfg.experiment.router.top_k).to(device)
+        # if model is quantized QAT
         # print("Expert 0 mode:", model.experts[0].net[0].num_bits) 
         # print("Expert 1 mode:", model.experts[1].net[0].num_bits) 
         class_weights = torch.tensor(1.0 / np.bincount(train_ds.labels.numpy()), dtype=torch.float32).to(device)
@@ -191,7 +195,6 @@ def main(cfg: DictConfig):
         mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
             memory_usage((train_moe_local, (cfg, load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
-        
         
         max_ram_mb_train = float(np.max(mem_train_usage)) if mem_train_usage else 0.0
         

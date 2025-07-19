@@ -6,6 +6,14 @@ import torch
 from pathlib import Path
 import os, torch
 
+
+def _load_cc_csv(csv_path: Path) -> dict:
+    if not csv_path.is_file():
+        return {}
+    df = pd.read_csv(csv_path)
+    return df.iloc[-1].to_dict() if len(df) else {}
+
+
 def print_size_of_model(model, label=""):
     torch.save(model.state_dict(), "temp.p")
     size=os.path.getsize("temp.p")
