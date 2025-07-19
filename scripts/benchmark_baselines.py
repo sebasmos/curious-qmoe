@@ -24,15 +24,6 @@ CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
     experiment.models_to_run="['1','2','4','8','16',esc]" \
     experiment.metadata.tag=benchmark_baselines
 
-CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
-    --config-path /Users/sebasmos/Desktop/QWave/config \
-    --config-name esc50 \
-    experiment.datasets.esc.normalization_type=standard \
-    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-    experiment.device=cpu \
-    experiment.models_to_run="[esc,qesc,bitnet,'1','2','4','8','16']" \
-    experiment.metadata.tag=benchmark_baselines
-
 python benchmark_baselines.py \
     --config-path /home/sebastian/codes/repo_clean/QWave/config \
     --config-name esc50 \
@@ -40,6 +31,18 @@ python benchmark_baselines.py \
     experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cpu \
     experiment.models_to_run="[qesc]" \
+    experiment.metadata.tag=benchmark_baselines
+
+
+
+Mac:
+CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
+    --config-path /Users/sebasmos/Desktop/QWave/config \
+    --config-name esc50 \
+    experiment.datasets.esc.normalization_type=standard \
+    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.device=cpu \
+    experiment.models_to_run="[esc,qesc,bitnet,'1','2','4','8','16']" \
     experiment.metadata.tag=benchmark_baselines
 """
 
@@ -289,10 +292,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
         
             print_size_of_model(final_model, "Original_Model")
             if model_kind == "qesc":
-
-                # if torch.backends.quantized.engine != 'fbgemm':
-                #     torch.backends.quantized.engine = 'fbgemm'
-                if platform.system() == "Darwin":  # macOS
+                if platform.system() == "Darwin":  
                     torch.backends.quantized.engine = 'qnnpack'
                 else:
                     torch.backends.quantized.engine = 'fbgemm'

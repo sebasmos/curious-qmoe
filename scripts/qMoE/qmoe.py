@@ -1,7 +1,6 @@
 """
 bitnet158b, bitnet 
 
-
   CUDA_VISIBLE_DEVICES=1 python qmoe.py \
   --config-path /home/sebastian/codes/repo_clean/QWave/config \
   --config-name esc50 \
@@ -41,7 +40,27 @@ CUDA_VISIBLE_DEVICES=1 python qmoe.py \
   experiment.datasets.esc.csv=/home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
   experiment.device=cpu \
   experiment.metadata.tag=p3
-  
+
+mac: 
+python qmoe.py \
+  --config-path /Users/sebasmos/Desktop/QWave/config \
+  --config-name esc50 \
+  "experiment.router.expert_quantizations=[esc,esc,esc,esc]" \
+  experiment.router.num_experts=4 \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+  experiment.device=cpu \
+  experiment.metadata.tag=p1
+
+python qmoe.py \
+  --config-path /Users/sebasmos/Desktop/QWave/config \
+  --config-name esc50 \
+  "experiment.router.expert_quantizations=[qesc,qesc,qesc,qesc]" \
+  experiment.router.num_experts=4 \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+  experiment.device=cpu \
+  experiment.metadata.tag=q1
 """
 
 from pathlib import Path
@@ -74,6 +93,7 @@ from QWave.utils import get_device
 from QWave.qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert#, calculate_real_and_potential_model_size_mb
 from fvcore.nn import FlopCountAnalysis
 from QWave.memory import print_size_of_model
+import platform
 
 class qMoEModelBatched(nn.Module):
     def __init__(self, cfg, in_dim, num_classes, num_experts=4, top_k=2):
@@ -233,28 +253,6 @@ cc_metrics_to_track = [
 @hydra.main(version_base=None, config_path="config", config_name="esc50")
 def main(cfg: DictConfig):
     warnings.filterwarnings("ignore", category=UserWarning)
-
-    # Create a dummy CSV file for demonstration if it doesn't exist
-    dummy_csv_path = Path(cfg.experiment.datasets.esc.csv)
-    if not dummy_csv_path.is_file():
-        # Ensure enough classes and samples for n_splits
-        n_samples = 100
-        n_classes = 10 
-        if n_classes < cfg.experiment.cross_validation.n_splits:
-            n_classes = cfg.experiment.cross_validation.n_splits + 1
-        if n_samples < cfg.experiment.cross_validation.n_splits:
-            n_samples = cfg.experiment.cross_validation.n_splits * 2 # At least 2 samples per fold
-
-        df_dummy = pd.DataFrame({
-            "class_id": np.random.randint(0, n_classes, n_samples),
-            "feature_1": np.random.rand(n_samples),
-            "feature_2": np.random.rand(n_samples),
-            "feature_3": np.random.rand(n_samples),
-            "folder": "f", "name": "n", "label": "l", "category": "c"
-        })
-        df_dummy.to_csv(dummy_csv_path, index=False)
-        print(f"Created dummy CSV: {dummy_csv_path}")
-
     df_full = pd.read_csv(cfg.experiment.datasets.esc.csv)
     if df_full.empty:
         print(f"[ERROR] Input CSV {cfg.experiment.datasets.esc.csv} is empty. Exiting.")
@@ -279,9 +277,6 @@ def main(cfg: DictConfig):
     all_training_flops = [] # Store training FLOPs per fold
     all_validation_flops = [] # Store validation FLOPs per fold
     fold_metrics = []
-
-    # Calculate parameter count once for the model type used in this main function
-    # It's assumed that the model architecture does not change per fold.
     in_dim_placeholder = df.shape[1] - (df_full.shape[1] - df.shape[1]) # Adjust for dropped columns if they were features
     if "class_id" in df.columns: # Adjust in_dim if class_id is still in df
         in_dim_placeholder -= 1
@@ -342,7 +337,7 @@ def main(cfg: DictConfig):
             memory_usage((train_moe_local, (cfg, load_balancing, model, train_ld, val_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
         train_tracker.stop()
         
-        # CORRECTED: Use np.max for peak RAM usage
+        
         max_ram_mb_train = float(np.max(mem_train_usage)) if mem_train_usage else 0.0
         
         train_end_time = time.perf_counter()
@@ -377,9 +372,10 @@ def main(cfg: DictConfig):
 
         if "qesc" in expert_quantizations:
             print("  -> Using qESC expert for validation.")
-            # ----- choose the right engine (x86) -----
-            if torch.backends.quantized.engine != 'fbgemm':
-                torch.backends.quantized.engine = 'fbgemm'
+            if platform.system() == "Darwin":  # macOS
+                    torch.backends.quantized.engine = 'qnnpack'
+            else:
+                    torch.backends.quantized.engine = 'fbgemm'
             
             # ----- quantise experts once -------------
             for i, exp in enumerate(final_model.experts):
