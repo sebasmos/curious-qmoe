@@ -55,6 +55,18 @@ python benchmark.py \
     "experiment.router.expert_quantizations=[1,2,4,16]"\
     experiment.router.num_experts=4 \
     experiment.metadata.tag=benchmark
+
+# qmoe with quantizations
+python benchmark.py \
+    --config-path /Users/sebasmos/Desktop/QWave/config \
+    --config-name esc50 \
+    experiment.datasets.esc.normalization_type=standard \
+    experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
+    experiment.device=cpu \
+    experiment.models_to_run="[qmoe]" \
+    "experiment.router.expert_quantizations=[1,2,4,16]"\
+    experiment.router.num_experts=4 \
+    experiment.metadata.tag=benchmark
 """
 
 from __future__ import annotations
@@ -99,13 +111,15 @@ def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
             dropout_prob=cfg.experiment.model.dropout_prob,
             num_bits="bitnet",
         )
-    if model_kind == "moe":
+    if model_kind == "moe" or model_kind == "qmoe":
+        # qmoe is initialized as MoE 
         device = get_device(cfg)
         num_classes = len(np.unique(pd.read_csv(cfg.experiment.datasets.esc.csv)["class_id"].values)) 
         return qMoEModelBatched(cfg, in_dim, 
             num_classes, 
             cfg.experiment.router.num_experts, 
             cfg.experiment.router.top_k).to(device)
+
     if model_kind == "bitnet158b":
         return BitNetExpert158b(
             in_dim, n_cls,
@@ -255,14 +269,12 @@ def run_cv(csv_path: str, cfg: DictConfig):
             tracker_tr = EmissionsTracker(output_dir=str(fold_dir), output_file="emissions_train.csv",
                                           project_name=f"{tag}_{model_kind}_fold{fold}_train")
             t0_train = time.perf_counter(); tracker_tr.start()
-
-            if model_kind == "moe": 
+            
+            if model_kind == "moe" or model_kind == "qmoe": 
                 load_balancing = cfg.experiment.router.load_balancing # Use load balancing from config
                 mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
                     memory_usage((train_moe_local, (cfg, load_balancing, model, tr_ld, vl_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
-
             else: 
-
                 mem_train_usage, (
                     model_trained, train_losses, val_losses, best_f1_from_train,
                     all_labels_best_epoch, all_preds_best_epoch, all_probs_best_epoch
@@ -306,7 +318,37 @@ def run_cv(csv_path: str, cfg: DictConfig):
             tracker_val.start()
         
             print_size_of_model(final_model, "Original_Model")
+
+
             if model_kind == "qesc":
+                if platform.system() == "Darwin":  
+                    torch.backends.quantized.engine = 'qnnpack'
+                else:
+                    torch.backends.quantized.engine = 'fbgemm'
+                print(torch.backends.quantized.engine)
+                expert_quantizations = cfg.experiment.router.expert_quantizations
+                # ----- quantise experts once -------------
+                for i, exp in enumerate(final_model.experts):
+                    # Check if expert i should be quantized based on its position in the list
+                    # This assumes expert_quantizations is a list corresponding to expert indices
+                    if i < len(expert_quantizations) and "qesc" in expert_quantizations[i]:
+                        if isinstance(exp, ESCModel):
+                            final_model.experts[i] = torch.quantization.quantize_dynamic(
+                                exp.cpu(), {nn.Linear}, dtype=torch.qint8
+                            )
+                            final_model.experts[i].to(device) # Move quantized expert back to device
+                        else:
+                            warnings.warn(f"Expert at index {i} is not an ESCModel, skipping qesc quantization.")
+                    
+                final_model.eval()
+                for param in final_model.parameters():
+                        param.requires_grad_(False)
+                val_start_time = time.perf_counter()
+                mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
+                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
+                dur_val = time.perf_counter() - val_start_time
+                model_size = print_size_of_model(final_model, "Quantized model")
+            elif model_kind == "qesc":
                 if platform.system() == "Darwin":  
                     torch.backends.quantized.engine = 'qnnpack'
                 else:
