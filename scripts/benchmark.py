@@ -64,7 +64,7 @@ python benchmark.py \
     experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
     experiment.device=cpu \
     experiment.models_to_run="[qmoe]" \
-    "experiment.router.expert_quantizations=[1,2,4,16]"\
+    "experiment.router.expert_quantizations=[qesc,qesc,qesc,qesc]"\
     experiment.router.num_experts=4 \
     experiment.metadata.tag=benchmark
 """
@@ -270,7 +270,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
                                           project_name=f"{tag}_{model_kind}_fold{fold}_train")
             t0_train = time.perf_counter(); tracker_tr.start()
             
-            if model_kind == "moe" or model_kind == "qmoe": 
+            if model_kind == "moe" or model_kind == "qmoe":
+                print(f"Training {model_kind} model...")
                 load_balancing = cfg.experiment.router.load_balancing # Use load balancing from config
                 mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
                     memory_usage((train_moe_local, (cfg, load_balancing, model, tr_ld, vl_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
@@ -320,7 +321,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
             print_size_of_model(final_model, "Original_Model")
 
 
-            if model_kind == "qesc":
+            if model_kind == "qmoe":
                 if platform.system() == "Darwin":  
                     torch.backends.quantized.engine = 'qnnpack'
                 else:
@@ -331,6 +332,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 for i, exp in enumerate(final_model.experts):
                     # Check if expert i should be quantized based on its position in the list
                     # This assumes expert_quantizations is a list corresponding to expert indices
+                    # import pdb; pdb.set_trace()  # Debugging line to inspect expert_quantizations
                     if i < len(expert_quantizations) and "qesc" in expert_quantizations[i]:
                         if isinstance(exp, ESCModel):
                             final_model.experts[i] = torch.quantization.quantize_dynamic(
@@ -344,7 +346,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 for param in final_model.parameters():
                         param.requires_grad_(False)
                 val_start_time = time.perf_counter()
-                mem_val_usage, (_, _, all_labels_final, all_preds_final, all_probs_final) = \
+                mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
                     memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(final_model, "Quantized model")
@@ -362,7 +364,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(qmodel, "Quantized_Model")
             elif model_kind == "moe":
-                # import pdb;pdb.set_trace()  # Debugging line to inspect model structure
+                
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
                     memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
