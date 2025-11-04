@@ -152,74 +152,142 @@ class BitNetExpert158b(nn.Module):
         return self.net(x)
 
 class BitLinear(nn.Module):
-    """
-    A BitLinear layer supporting both fixed bit-widths (1, 2, 4, 8, 16) and BitNet-style ternary quantization.
-    """
-    def __init__(self, in_features, out_features, num_bits=16):
-        super(BitLinear, self).__init__()
+    def __init__(self, in_features, out_features, num_bits="bitnet", bias=True, pre_ln=True):
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.num_bits = num_bits
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.num_bits = num_bits  # "bitnet" or int in {1,2,4,8,16,...}
+        self.pre_ln = pre_ln
+
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
         nn.init.xavier_uniform_(self.weight)
+        self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
+        self.act_ln = nn.LayerNorm(in_features) if pre_ln else nn.Identity()
 
     def forward(self, x):
         if self.num_bits == "bitnet":
             return self.forward_bitnet(x)
-        
         elif isinstance(self.num_bits, int) and self.num_bits >= 16:
-            return F.linear(x, self.weight)
+            return F.linear(self.act_ln(x), self.weight, self.bias)
         else:
-            return self.forward_quantized(x)
+            return self.forward_kbit(x)
 
-    def forward_quantized(self, x):
-        # Activation quantization (absmax scaling)
-        scale = 127.0 / x.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-5)
-        x_quant = (x * scale).round().clamp(-128, 127) / scale
-        x_final = x + (x_quant - x).detach()  # STE for activation
+    def forward_kbit(self, x):
+        # Activation quant (absmax) with STE
+        x = self.act_ln(x)
+        x_scale = 127.0 / x.abs().amax(dim=-1, keepdim=True).clamp(min=1e-5)
+        xq = (x * x_scale).round().clamp(-128, 127) / x_scale
+        xa = x + (xq - x).detach()
 
-        # Weight quantization (absmax scaling)
-        w_centered = self.weight - self.weight.mean()
+        # Weight quant (symmetric, per-layer) with STE
+        Wc = self.weight - self.weight.mean()
         if self.num_bits == 1:
-            w_quant = torch.sign(w_centered)  # Ternary
+            wq = torch.sign(Wc)
         else:
-            q_min = -2.**(self.num_bits - 1)
-            q_max = 2.**(self.num_bits - 1) - 1
-            w_scale = w_centered.abs().max() / q_max
-            w_quant = torch.round(w_centered / w_scale.clamp(min=1e-5)).clamp(q_min, q_max)
-            w_quant = w_quant * w_scale
+            qmin = -2**(self.num_bits - 1)
+            qmax =  2**(self.num_bits - 1) - 1
+            w_scale = Wc.abs().amax().clamp(min=1e-5) / qmax
+            wq = (Wc / w_scale).round().clamp(qmin, qmax) * w_scale
+        Wf = self.weight + (wq - self.weight).detach()
 
-        w_final = self.weight + (w_quant - self.weight).detach() # STE for weights
-        return F.linear(x_final, w_final)
+        return F.linear(xa, Wf, self.bias)
 
     def forward_bitnet(self, x):
-        # Activation ternarization with STE
-        x_codebook = torch.sign(x)
-        x_final = x + (x_codebook - x).detach()
+        # --- Pre-normalize activations ---
+        x = self.act_ln(x)
 
-        # Weight ternarization with STE
-        w_centered = self.weight - self.weight.mean()
-        w_ternary = torch.sign(w_centered)
-        w_final = self.weight + (w_ternary - self.weight).detach()
+        # --- Ternary activations (optionally allow zeros) + STE ---
+        delta_a = 0.05  # set to 0.05 to introduce zeros in activations
+        thr_a = delta_a * x.abs().mean(dim=-1, keepdim=True)
+        xa_code = torch.where(x.abs() < thr_a, torch.zeros_like(x), torch.sign(x))
+        xa = x + (xa_code - x).detach()  # STE
 
-        return F.linear(x_final, w_final)
+        # --- Ternary weights with per-output-channel alpha + STE ---
+        W  = self.weight
+        Wc = W - W.mean(dim=1, keepdim=True)
 
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.weight)
+        delta_w = 0.15   # small threshold -> some zeros, improves stability
+        thr_w = delta_w * Wc.abs().mean(dim=1, keepdim=True)
+        code = torch.where(Wc.abs() < thr_w, torch.zeros_like(Wc), torch.sign(Wc))  # {-1,0,+1}
+
+        nz = (code != 0).float()
+        alpha = (Wc.abs() * nz).sum(dim=1, keepdim=True) / nz.sum(dim=1, keepdim=True).clamp(min=1.0)
+        wq = alpha * code
+        Wf = W + (wq - W).detach()  # STE
+
+        return F.linear(xa, Wf, self.bias)
+# class BitLinear(nn.Module):
+#     """
+#     A BitLinear layer supporting both fixed bit-widths (1, 2, 4, 8, 16) and BitNet-style ternary quantization.
+#     """
+#     def __init__(self, in_features, out_features, num_bits=16):
+#         super(BitLinear, self).__init__()
+#         self.in_features = in_features
+#         self.out_features = out_features
+#         self.num_bits = num_bits
+#         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+#         nn.init.xavier_uniform_(self.weight)
+
+#     def forward(self, x):
+#         if self.num_bits == "bitnet":
+#             return self.forward_bitnet(x)
+        
+#         elif isinstance(self.num_bits, int) and self.num_bits >= 16:
+#             return F.linear(x, self.weight)
+#         else:
+#             return self.forward_quantized(x)
+
+#     def forward_quantized(self, x):
+#         # Activation quantization (absmax scaling)
+#         scale = 127.0 / x.abs().max(dim=-1, keepdim=True).values.clamp(min=1e-5)
+#         x_quant = (x * scale).round().clamp(-128, 127) / scale
+#         x_final = x + (x_quant - x).detach()  # STE for activation
+
+#         # Weight quantization (absmax scaling)
+#         w_centered = self.weight - self.weight.mean()
+#         if self.num_bits == 1:
+#             w_quant = torch.sign(w_centered)  # Ternary
+#         else:
+#             q_min = -2.**(self.num_bits - 1)
+#             q_max = 2.**(self.num_bits - 1) - 1
+#             w_scale = w_centered.abs().max() / q_max
+#             w_quant = torch.round(w_centered / w_scale.clamp(min=1e-5)).clamp(q_min, q_max)
+#             w_quant = w_quant * w_scale
+
+#         w_final = self.weight + (w_quant - self.weight).detach() # STE for weights
+#         return F.linear(x_final, w_final)
+
+#     def forward_bitnet(self, x):
+#         # Activation ternarization with STE
+#         x_codebook = torch.sign(x)
+#         x_final = x + (x_codebook - x).detach()
+
+#         # Weight ternarization with STE
+#         w_centered = self.weight - self.weight.mean()
+#         w_ternary = torch.sign(w_centered)
+#         w_final = self.weight + (w_ternary - self.weight).detach()
+
+#         return F.linear(x_final, w_final)
+
+#     def reset_parameters(self):
+#         nn.init.xavier_uniform_(self.weight)
 
 class BitNetExpert(nn.Module):
-    """An expert model using the original BitLinear layers and LayerNorm."""
-    def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob, num_bits=16):
+    def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob,
+                 num_bits="bitnet", pre_ln=True, bias=True):
         super().__init__()
         layers = []
-        last_dim = in_dim
-        for hidden_dim in hidden_sizes:
-            layers.append(BitLinear(last_dim, hidden_dim, num_bits=num_bits))
-            layers.append(nn.LayerNorm(hidden_dim))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout_prob))
-            last_dim = hidden_dim
-        layers.append(BitLinear(last_dim, num_classes, num_bits=num_bits))
+        last = in_dim
+        for h in hidden_sizes:
+            layers += [
+                BitLinear(last, h, num_bits=num_bits, bias=bias, pre_ln=pre_ln),
+                nn.LayerNorm(h),
+                nn.ReLU(),
+                nn.Dropout(dropout_prob),
+            ]
+            last = h
+        # FINAL CLASSIFIER IN FP32 (stabilizer)
+        layers.append(nn.Linear(last, num_classes, bias=True))
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
