@@ -99,7 +99,7 @@ from QWave.memory import print_size_of_model, _load_cc_csv
 from QWave.utils import get_device, get_num_parameters
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b
-from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
+from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched,BayesianRouter
 # ─── Model factory ──────────────────────────────────────────────────────────
 
 def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
@@ -347,7 +347,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
                         param.requires_grad_(False)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
+    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
+
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(final_model, "Quantized model")
             elif model_kind == "qesc":
@@ -367,7 +368,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)), interval=0.01, retval=True)
+    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
+
             
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(model, "Model after validation")
@@ -520,3 +522,7 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
+
+"""
+
+"""    
