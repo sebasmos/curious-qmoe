@@ -1,7 +1,10 @@
-# SClassifier, reset_weightsimport torch
-from torch import nn
-import timm
+# SClassifier, reset_weights
 import torch
+from torch import nn
+try:
+    import timm
+except ImportError:
+    timm = None
 import torch.nn.functional as F
 
 class ESCModel(nn.Module):

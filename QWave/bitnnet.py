@@ -1,9 +1,7 @@
 #### QWave BitLinear Module ####
 from torch import nn
-import timm
 import torch
 import torch.nn.functional as F
-import random
 
 """
 Quantizes weights to ternary values (-1, 0, +1) using absmean quantization.

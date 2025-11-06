@@ -1,27 +1,34 @@
-# This CITATION.cff file was generated with cffinit.
-# Visit https://bit.ly/cffinit to generate yours today!
-
 cff-version: 1.2.0
-title: >-
-  QuantAudio
-message: >-
-  If you use this software, please cite it using the
-  metadata from this file.
+message: "If you use this software, please cite it as below."
 type: software
+title: "QWave: Quantized Audio Classification Framework"
 authors:
-  - family-names: "Cajas Ordóñez"
+  - family-names: "Cajas-Ordóñez"
     given-names: "Sebastián Andrés"
-    alias: sebasmos
-  - family-names: "Torres Torres"
+  - family-names: "Torres"
     given-names: "Luis"
-  - family-names: "Duran"
+  - family-names: "Meno"
+    given-names: "Mackenzie"
+  - family-names: "Lai"
+    given-names: "Yuan"
+  - family-names: "Durán"
     given-names: "Carlos"
-  - family-names: "Bosch"
-    given-names: "Cristian"
-  - family-names: "Simón Carbajo"
-    given-names: "Ricardo"
-keywords:
-  - Vector Embeddings
-repository-code: 'https://github.com/sebasmos/quantaudio'
+  - family-names: "Celi"
+    given-names: "Leo Anthony"
+url: "https://github.com/sebasmos/QWave"
+repository-code: "https://github.com/sebasmos/QWave"
 license: MIT
-date-released: 'XXXX'
+date-released: "2025-01-06"
+version: "1.0.0"
+keywords:
+  - audio-classification
+  - quantization
+  - mixture-of-experts
+  - bayesian-deep-learning
+  - uncertainty-estimation
+  - bitnet
+  - model-compression
+  - soundscape-analysis
+  - pytorch
+  - efficient-ml
+

@@ -15,17 +15,21 @@ def _load_cc_csv(csv_path: Path) -> dict:
     return df.iloc[-1].to_dict() if len(df) else {}
 
 
-def print_size_of_model(model, label=""):
+def print_size_of_model(model, label="", debug=False):
     """
     Calculate model size accounting for quantization.
     For quantized models, calculates theoretical size based on bit-width.
     For full-precision models, saves and measures actual file size.
     """
     from QWave.bitnnet import BitLinear
-    from QWave.qmoe_layers import BitwisePopcountLinear
+    try:
+        from QWave.qmoe_layers import BitwisePopcountLinear
+    except ImportError:
+        BitwisePopcountLinear = None
 
     total_bits = 0
     has_quantized_layers = False
+    layer_breakdown = []
 
     for name, param in model.named_parameters():
         # Check if this parameter belongs to a quantized layer
@@ -41,6 +45,9 @@ def print_size_of_model(model, label=""):
                     break
 
         # Determine bit-width based on layer type
+        param_bits = 0
+        layer_type = "FP32"
+
         if isinstance(module, BitLinear):
             has_quantized_layers = True
             if param_name == 'weight':
@@ -50,30 +57,54 @@ def print_size_of_model(model, label=""):
                     num_weights = param.numel()
                     ternary_bits = num_weights * 2  # 2 bits per ternary value
                     alpha_bits = param.shape[0] * 32  # One alpha per output channel
-                    total_bits += ternary_bits + alpha_bits
+                    param_bits = ternary_bits + alpha_bits
+                    layer_type = f"BitNet(ternary)"
                 elif isinstance(module.num_bits, int):
                     # k-bit quantization (1, 2, 4, 8, 16 bits)
                     bits = module.num_bits
                     # Add scale factor overhead (one 32-bit float per layer for symmetric quant)
-                    total_bits += param.numel() * bits + 32
+                    param_bits = param.numel() * bits + 32
+                    layer_type = f"BitLinear({bits}bit)"
                 else:
                     # Fallback to float32
-                    total_bits += param.numel() * 32
+                    param_bits = param.numel() * 32
+                    layer_type = "BitLinear(FP32)"
             else:
                 # bias and other params remain float32
-                total_bits += param.numel() * 32
+                param_bits = param.numel() * 32
+                layer_type = f"BitLinear-{param_name}(FP32)"
 
-        elif isinstance(module, BitwisePopcountLinear):
+        elif BitwisePopcountLinear is not None and isinstance(module, BitwisePopcountLinear):
             has_quantized_layers = True
             if param_name == 'weight':
                 # Ternary with 2-bit encoding per value
-                total_bits += param.numel() * 2
+                param_bits = param.numel() * 2
+                layer_type = "BitwisePopcount(2bit)"
             else:
-                total_bits += param.numel() * 32
+                param_bits = param.numel() * 32
+                layer_type = f"BitwisePopcount-{param_name}(FP32)"
 
         else:
             # Full-precision parameter (float32)
-            total_bits += param.numel() * 32
+            param_bits = param.numel() * 32
+            layer_type = f"{module.__class__.__name__}(FP32)"
+
+        total_bits += param_bits
+        if debug:
+            layer_breakdown.append({
+                'name': name,
+                'type': layer_type,
+                'params': param.numel(),
+                'bits': param_bits,
+                'size_kb': param_bits / 8 / 1e3
+            })
+
+    if debug:
+        print(f"\n=== DEBUG: Model {label} ===")
+        for info in layer_breakdown:
+            print(f"  {info['name']:40s} | {info['type']:25s} | params: {info['params']:8d} | {info['size_kb']:.3f} KB")
+        print(f"  {'TOTAL':40s} | {'':<25s} | {'':8s} | {total_bits/8/1e3:.3f} KB")
+        print("=" * 100)
 
     if has_quantized_layers:
         # Return theoretical quantized size

@@ -200,8 +200,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
 
         all_final_accuracy_scores, all_final_f1_scores = [], []
         all_training_durations, all_validation_durations = [], []
-        all_max_ram_mb_train, all_max_ram_mb_val = [], [] 
-        all_model_size_mb = []
+        all_max_ram_mb_train, all_max_ram_mb_val = [], []
         all_training_flops, all_validation_flops = [], []
         
         all_train_cc_data_agg = {k: [] for k in cc_metrics_to_track}
@@ -348,7 +347,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
                     memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
-                model_size = print_size_of_model(final_model, "Quantized model")
             elif model_kind == "qesc":
                 if platform.system() == "Darwin":  
                     torch.backends.quantized.engine = 'qnnpack'
@@ -361,30 +359,26 @@ def run_cv(csv_path: str, cfg: DictConfig):
                     (_validate_single_epoch, (qmodel, vl_ld, nn.CrossEntropyLoss(), device)),
                     interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
-                model_size = print_size_of_model(qmodel, "Quantized_Model")
             elif model_kind == "moe":
 
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
                     memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
-            
+
                 dur_val = time.perf_counter() - val_start_time
-                model_size = print_size_of_model(model, "Model after validation")
             
-            else: 
+            else:
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
                     (_validate_single_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)),
                     interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
-                model_size = print_size_of_model(model, "Model after validation")
 
             tracker_val.stop()
         
             max_ram_mb_val = float(np.max(mem_val_usage)) if mem_val_usage else 0.0
             all_max_ram_mb_val.append(max_ram_mb_val)
             all_validation_durations.append(dur_val)
-            all_model_size_mb.append(model_size)
 
             val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
             for k in cc_metrics_to_track:
@@ -406,7 +400,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
             fold_result = {
                 "best_f1": final_f1_weighted,
                 "accuracy": final_accuracy,
-                "model_size": model_size / 1e6, # Model size in MB
                 "max_ram_mb_train": float(max_ram_mb_train),
                 "max_ram_mb_val": float(max_ram_mb_val), # Peak memory (RAM) during validation
                 "training_duration_seconds": float(dur_tr),
@@ -429,7 +422,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "f1_std": float(np.std(all_final_f1_scores)),
             "accuracy_mean": float(np.mean(all_final_accuracy_scores)),
             "accuracy_std": float(np.std(all_final_accuracy_scores)),
-            "model_size_mb": float(np.mean([m["model_size"] for m in fold_metrics])),
             "training_duration_mean_seconds": float(np.mean(all_training_durations)),
             "training_duration_std_seconds": float(np.std(all_training_durations)),
             "validation_duration_mean_seconds": float(np.mean(all_validation_durations)),
@@ -476,7 +468,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "Param. Count": summary.get("parameter_count"),
             "Acc (Mean)": summary.get("accuracy_mean"),
             "F1 (Mean)": summary.get("f1_mean"),
-            "Model size (MB)": summary.get("model_size_mb"),
             "Infer. RAM (GB)": summary.get("max_ram_mb_val_mean", 0.0) / 1024,
             "Train. Runtime (s)": summary.get("training_duration_mean_seconds"),
             "Latency (s)": summary.get("validation_duration_mean_seconds"),
