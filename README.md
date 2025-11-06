@@ -282,10 +282,10 @@ This project is licensed under the [MIT License](https://github.com/sebasmos/Qua
 
 ```bibtex
 @software{Cajas2025_QWave,
-  author = {Sebastián Andrés Cajas Ordóñez and others},
-  title = {QWave: Quantized Embeddings for Efficient Audio Classification},
+  author = {Cajas-Ordóñez, Sebastián Andrés and Torres, Luis and Meno, Mackenzie and Lai, Yuan and Durán, Carlos and Celi, Leo Anthony},
+  title = {QWave: Quantized Audio Classification Framework},
   year = {2025},
-  url = {https://github.com/sebasmos/QuantAudio},
+  url = {https://github.com/sebasmos/QWave},
   license = {MIT}
 }
 ```
