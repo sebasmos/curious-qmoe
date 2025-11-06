@@ -12,7 +12,7 @@
 ## 🔍 Overview
 
 **QWave** provides an efficient and lightweight pipeline for soundscape classification based on quantized vector embeddings derived from pre-trained models. The framework supports ESC-50 and UrbanSound8K datasets and includes post-training quantization, cross-validation, and experiment tracking via Hydra.
-
+CUDA version: 12.6 
 ---
 
 ## 📁 Project Structure
@@ -49,8 +49,6 @@ conda activate qwave
 ### 2. Install Requirements
 
 ```bash
-
-
 git clone https://github.com/sebasmos/qwave.git
 cd qwave
 pip install -e .
