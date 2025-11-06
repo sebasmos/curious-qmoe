@@ -11,26 +11,40 @@
 
 ## 🔍 Overview
 
-**QWave** provides an efficient and lightweight pipeline for soundscape classification based on quantized vector embeddings derived from pre-trained models. The framework supports ESC-50 and UrbanSound8K datasets and includes post-training quantization, cross-validation, and experiment tracking via Hydra.
-CUDA version: 12.6 
+**QWave** provides an efficient and lightweight pipeline for soundscape classification based on quantized vector embeddings derived from pre-trained models. The framework supports:
+
+- **Multiple quantization schemes**: 1, 2, 4, 8, 16-bit, BitNet ternary, and bitwise popcount
+- **Mixture-of-Experts (MoE)** with heterogeneous quantized experts
+- **Bayesian Router with curiosity mode** for epistemic uncertainty estimation
+- **Accurate model size calculation** for quantized models
+- **Cross-validation and experiment tracking** via Hydra
+
+**Datasets**: ESC-50 and UrbanSound8K
+
+**Requirements**: CUDA 12.6+ (optional for GPU acceleration)
+
 ---
 
 ## 📁 Project Structure
 
 ```text
-QuantAudio/
-├── configs/                   # Hydra configs for training and experiment tracking
-│   └── configs.yaml           # Central configuration file
+QWave/
+├── config/                    # Hydra configs for experiments
+│   └── esc50.yaml             # ESC-50 configuration with curiosity mode
 ├── QWave/                     # Core source code
-│   ├── datasets.py            # EmbeddingDataset class and quantization logic
-│   ├── models.py              # Simple MLP classifier definition
-│   ├── train_utils.py         # Training and logging utilities
-│   ├── memory.py              # Memory usage profiler
-│   └── utils.py               # Save, seeding, and metric helpers
-├── scripts/                   # Run scripts
-│   └── train_cv.py            # K-Fold cross-validation pipeline using Hydra
+│   ├── datasets.py            # EmbeddingDataset class and normalization
+│   ├── models.py              # Neural network architectures (MLP, ESCModel)
+│   ├── bitnnet.py             # BitNet quantized layers (1-16 bit, ternary)
+│   ├── qmoe_layers.py         # Quantized MoE layers (BitwisePopcount)
+│   ├── moe.py                 # MoE training and Bayesian Router with curiosity
+│   ├── train_utils.py         # Training and validation utilities
+│   ├── memory.py              # Model size calculation (quantization-aware)
+│   ├── graphics.py            # Plotting (ROC, losses, curiosity distributions)
+│   └── utils.py               # Helpers (seeding, device selection, metrics)
+├── scripts/                   # Benchmark scripts
+│   └── benchmark.py           # Main benchmarking pipeline with MoE support
 ├── outputs/                   # Auto-generated experiment results
-├── requirements.txt           # Python dependencies
+├── pyproject.toml             # Package configuration
 ├── LICENSE
 └── README.md
 ```
@@ -56,140 +70,214 @@ pip install -e .
 
 ---
 
-## 🚀 Run Cross-Validation For Vector Embeddings Framework
+## 🚀 Quick Start
 
-You can run an experiment with:
+### Basic Usage
+
+Run benchmarks with the default configuration:
 
 ```bash
-python run_trainer.py --config-name=esc50 \
-  experiment.datasets.esc.csv=path_to_embeddings_csv \
+cd scripts
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
   experiment.device=cpu \
+  experiment.models_to_run=[esc]
 ```
 
-For example: 
+### MoE with Curiosity Mode
+
+Enable Bayesian Router with epistemic uncertainty estimation:
 
 ```bash
-python run_trainer.py --config-name=esc50 \
-  experiment.datasets.esc.csv=/Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv \
-  experiment.device=cuda \
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.device=cpu \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.models_to_run=[moe] \
+  experiment.router.expert_quantizations="[bitnet,'1','2','4','8','16',qesc]" \
+  experiment.router.num_experts=3 \
+  experiment.router.top_k=1 \
+  experiment.router.use_curiosity=true \
+  experiment.metadata.tag=esc_moe_curiosity
 ```
 
-> ✅ This will save logs and checkpoints in `outputs/experiment_name/fold_*/`.
+**Curiosity outputs** (saved per fold in `outputs/esc_moe_curiosity/moe/fold_X/`):
+- `curiosity_values.json` - Raw uncertainty values per sample
+- `curiosity_histogram.png` - Distribution of epistemic uncertainty
+- `curiosity_per_class.png` - Average uncertainty per predicted class
+
+> ✅ Results and checkpoints are saved in `outputs/<tag>/<model>/fold_*/`
 
 ---
 
-## 🔍 Config Overview (`configs.yaml`)
+## 🔍 Config Overview
+
+The main configuration file is `config/esc50.yaml`. Key parameters:
 
 ```yaml
 experiment:
+  models_to_run: [esc]  # Options: esc, bitnet, moe, qmoe, 1, 2, 4, 8, 16, qesc
+  device: "cpu"  # or "cuda", "mps"
+
   datasets:
     esc:
-      csv: "/absolute/path/to/esc-50.csv"
+      csv: "/path/to/esc-50.csv"
+      normalization_type: "standard"  # or "l2", "min_max", "raw"
 
   model:
-    batch_size: 32
-    hidden_sizes: [256, 128, 64]
-    learning_rate: 0.001
+    batch_size: 64
+    hidden_sizes: [640, 320]
+    learning_rate: 0.0005793146438537801
+    dropout_prob: 0.1953403862875243
+    epochs: 10
 
-  training:
-    epochs: 50
-    early_stopping:
-      patience: 10
-      delta: 0.01
+  router:  # For MoE models
+    expert_quantizations: [1, 2, 4, 16]
+    num_experts: 4
+    top_k: 1
+    use_curiosity: false  # Enable Bayesian Router with uncertainty
+    load_balancing: true
+    load_balancing_alpha: 1e-3
 
   cross_validation:
     n_splits: 5
     shuffle: true
     random_seed: 42
 
-  logging:
-    log_interval: 50
-    save_checkpoint: true
-    resume: true
-
   metadata:
-    tag: "exp01"
-    notes: "EfficientNet baseline on ESC-50"
+    tag: "experiment_name"
+    notes: ""
 ```
 
 ---
-
-
-## ➕ Add a New Dataset
-
-To add a new dataset configuration:
-
-**Create a new YAML file** inside the `config/` folder. For example:
-
-config/urbansound.yaml
-
-**Define the structure** like this:
-
-```yaml
-defaults:
-  - override hydra/job_logging: disabled
-  - override hydra/hydra_logging: disabled
-
-hydra:
-  run:
-    dir: ./outputs/${experiment.metadata.tag}
-  output_subdir: null
-
-experiment:
-  device: cuda
-  datasets:
-    csv: /absolute/path/to/urbansound.csv
-    imgs: /absolute/path/to/urbansound/images
-  model:
-    batch_size: 64
-    hidden_sizes: [512, 256]
-    learning_rate: 0.001
-    dropout_prob: 0.3
-    epochs: 100
-    early_stopping:
-      patience: 10
-      delta: 0.01
-    weight_decay: 0.001
-    label_smoothing: 0.0
-    patience: 10
-    factor: 0.5
-  cross_validation:
-    n_splits: 5
-    shuffle: true
-    random_seed: 42
-  logging:
-    log_interval: 50
-    save_checkpoint: true
-    resume: true
-  metadata:
-    tag: urbansound_run
-    notes: UrbanSound8K experiment
-```
-
-Run it using:
-
-`python run_trainer.py --config-name=urbansound`
-
-
-(Optional) Override fields at runtime:
-
-```
-python run_trainer.py --config-name=urbansound \
-  experiment.datasets.csv=/custom/path/urbansound.csv \
-  experiment.metadata.tag=my_custom_tag
-```
-
---- 
 
 
 ## 📊 Features
 
 - ✅ **Embedding extraction from EfficientNet / CLIP ViT**
-- ✅ **Post-training quantization**
+- ✅ **Post-training quantization (1, 2, 4, 8, 16-bit)**
+- ✅ **BitNet ternary quantization**
+- ✅ **Mixture-of-Experts (MoE) with quantized experts**
+- ✅ **Bayesian Router with curiosity-driven uncertainty estimation**
+- ✅ **Accurate model size calculation for quantized models**
 - ✅ **Cross-validation with reproducible config**
 - ✅ **Class-imbalance handling**
 - ✅ **Memory profiling & metrics logging**
 - ✅ **Hydra integration for flexible experiments**
+
+---
+
+## 🔬 Benchmarking
+
+### Model Size Calculation
+
+QWave includes accurate model size calculation that accounts for quantization. Unlike traditional approaches that save `state_dict()` (which stores dequantized float32 weights), our implementation calculates the **theoretical quantized size** based on bit-width:
+
+```python
+from QWave.memory import print_size_of_model
+
+# Automatically detects quantization and reports accurate size
+print_size_of_model(model, label="quantized_model")
+# Output: model: quantized_model     Size (KB): 12.345 [quantized]
+```
+
+**Supported quantization schemes:**
+- **1-bit to 16-bit**: Symmetric quantization with scale factors
+- **BitNet**: Ternary weights {-1, 0, 1} with per-channel alpha scaling
+- **qesc**: Bitwise popcount with 2-bit ternary encoding
+
+### Running Benchmarks
+
+#### 1. Baseline Models (CPU)
+
+Run all baseline quantized models (1, 2, 4, 8, 16-bit) and full-precision ESC model:
+
+```bash
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.device=cpu \
+  experiment.models_to_run="['1','2','4','8','16',esc]" \
+  experiment.metadata.tag=benchmark_baselines_cpu
+```
+
+#### 2. BitNet Baseline (CPU)
+
+Run BitNet and full-precision models:
+
+```bash
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.device=cpu \
+  experiment.models_to_run="[bitnet,esc]" \
+  experiment.metadata.tag=benchmark_bitnet
+```
+
+#### 3. Mixture-of-Experts (MoE)
+
+Run MoE with heterogeneous quantized experts (BitNet, 1-bit, 2-bit, 4-bit, 8-bit, 16-bit, qesc):
+
+```bash
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.device=cpu \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.models_to_run=[moe] \
+  experiment.router.expert_quantizations="[bitnet,'1','2','4','8','16',qesc]" \
+  experiment.router.num_experts=3 \
+  experiment.router.top_k=1 \
+  experiment.metadata.tag=esc_moe_heterogeneous
+```
+
+#### 4. MoE with Curiosity (Bayesian Router)
+
+Enable **curiosity mode** to use a Bayesian Router with Monte Carlo Dropout for epistemic uncertainty estimation:
+
+```bash
+python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.device=cpu \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.models_to_run=[moe] \
+  experiment.router.expert_quantizations="[bitnet,'1','2','4','8','16',qesc]" \
+  experiment.router.num_experts=3 \
+  experiment.router.top_k=1 \
+  experiment.router.use_curiosity=true \
+  experiment.metadata.tag=esc_moe_curiosity
+```
+
+**Curiosity outputs** (saved per fold):
+- `curiosity_values.json` - Raw uncertainty values per sample
+- `curiosity_histogram.png` - Distribution of epistemic uncertainty
+- `curiosity_per_class.png` - Average uncertainty per predicted class
+
+#### 5. GPU Benchmarks
+
+For GPU execution, set `CUDA_VISIBLE_DEVICES` and use `experiment.device=cuda`:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python benchmark.py \
+  --config-path /path/to/QWave/config \
+  --config-name esc50 \
+  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.normalization_type=standard \
+  experiment.device=cuda \
+  experiment.models_to_run="['1','2','4','8','16',esc]" \
+  experiment.metadata.tag=benchmark_baselines_cuda
+```
 
 ---
 
@@ -216,4 +304,3 @@ This project is licensed under the [MIT License](https://github.com/sebasmos/Qua
   license = {MIT}
 }
 ```
-

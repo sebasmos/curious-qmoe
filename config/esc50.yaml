@@ -26,7 +26,7 @@ experiment:
     dropout_prob:  0.1953403862875243
     epochs: 10
     early_stopping:
-      patience: 19
+      patience: 19  
       delta: 0.01
     weight_decay: 0.0051275736171219844
     label_smoothing: 0.10851194368924916
@@ -50,7 +50,7 @@ experiment:
     load_balancing_alpha: 1e-3
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
     diversity_loss_alpha: 1e-3  # New parameter for diversity loss
-    use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for uncertainty estimation
+    use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for epistemic uncertainty estimation
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     
