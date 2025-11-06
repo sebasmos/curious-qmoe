@@ -24,7 +24,7 @@ experiment:
     hidden_sizes: [640, 320]
     learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243
-    epochs: 10
+    epochs: 100
     early_stopping:
       patience: 19  
       delta: 0.01
