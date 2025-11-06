@@ -24,7 +24,7 @@ experiment:
     hidden_sizes: [640, 320]
     learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243
-    epochs: 100
+    epochs: 10
     early_stopping:
       patience: 19
       delta: 0.01
@@ -40,7 +40,7 @@ experiment:
       delta: 0.001
     num_experts: 4
     top_k: 1
-    hidden_dim: 128 
+    hidden_dim: 128
     dropout_prob: 0.2
     epochs: 150
     lr_moe_train: 1e-3
@@ -50,6 +50,7 @@ experiment:
     load_balancing_alpha: 1e-3
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
     diversity_loss_alpha: 1e-3  # New parameter for diversity loss
+    use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for uncertainty estimation
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     
