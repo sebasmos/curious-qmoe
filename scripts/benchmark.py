@@ -1,5 +1,6 @@
 # run_three_models.py
 #!/usr/bin/env python
+
 """
 Train **single-network** versions of:
   1. BitNet        (ternary)        – key: "bitnet"
@@ -20,7 +21,7 @@ python benchmark_baselines.py --config-path /home/sebastian/codes/repo_clean/QWa
 CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py --config-path /home/sebasmos/Desktop/QWave/config \
     --config-name esc50 \
     experiment.datasets.esc.normalization_type=standard \
-    experiment.datasets.esc.csv=/home/sebas0mos/Documents/DATASET/esc-50.csv \
+    experiment.datasets.esc.csv=/home/sebasmos/Documents/DATASET/esc-50.csv \
     experiment.device=cuda \
     experiment.models_to_run="["bitnet", "qesc", '1','2','4','8','16',esc]" \
     experiment.metadata.tag=benchmark_baselines
@@ -34,9 +35,7 @@ python benchmark_baselines.py \
     experiment.models_to_run="[qesc]" \
     experiment.metadata.tag=benchmark_baselines
 
-
-
-Mac:
+Mac: 
 CUDA_VISIBLE_DEVICES=1 python benchmark_baselines.py \
     --config-path /Users/sebasmos/Desktop/QWave/config \
     --config-name esc50 \
@@ -100,7 +99,7 @@ from QWave.memory import print_size_of_model, _load_cc_csv
 from QWave.utils import get_device, get_num_parameters
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b
-from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched,BayesianRouter
+from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
 # ─── Model factory ──────────────────────────────────────────────────────────
 
 def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
@@ -333,7 +332,6 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 for i, exp in enumerate(final_model.experts):
                     # Check if expert i should be quantized based on its position in the list
                     # This assumes expert_quantizations is a list corresponding to expert indices
-                    # import pdb; pdb.set_trace()  # Debugging line to inspect expert_quantizations
                     if i < len(expert_quantizations) and "qesc" in expert_quantizations[i]:
                         if isinstance(exp, ESCModel):
                             final_model.experts[i] = torch.quantization.quantize_dynamic(
@@ -348,8 +346,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                         param.requires_grad_(False)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
-
+                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(final_model, "Quantized model")
             elif model_kind == "qesc":
@@ -366,11 +363,10 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(qmodel, "Quantized_Model")
             elif model_kind == "moe":
-                
+
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
-
+                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
             
                 dur_val = time.perf_counter() - val_start_time
                 model_size = print_size_of_model(model, "Model after validation")
@@ -523,7 +519,3 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
-
-"""
-
-"""    
