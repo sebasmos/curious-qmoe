@@ -192,34 +192,34 @@ print_size_of_model(model, label="quantized_model")
 
 ### Running Benchmarks
 
-#### 1. Baseline Models (CPU)
+#### 1. Quantized Models Baseline (GPU)
 
-Run all baseline quantized models (1, 2, 4, 8, 16-bit) and full-precision ESC model:
+Run all baseline quantized models (1, 2, 4, 8, 16-bit) and full-precision ESC model on GPU:
 
 ```bash
-python benchmark.py \
-  --config-path /path/to/QWave/config \
+CUDA_VISIBLE_DEVICES=1 python benchmark.py \
+  --config-path /home/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
-  experiment.datasets.esc.csv=/path/to/esc-50.csv \
   experiment.datasets.esc.normalization_type=standard \
-  experiment.device=cpu \
+  experiment.datasets.esc.csv=/home/sebasmos/Documents/DATASET/esc-50.csv \
+  experiment.device=cuda \
   experiment.models_to_run="['1','2','4','8','16',esc]" \
-  experiment.metadata.tag=benchmark_baselines_cpu
+  experiment.metadata.tag=benchmark_baselines
 ```
 
 #### 2. BitNet Baseline (CPU)
 
-Run BitNet and full-precision models:
+Run BitNet ternary quantization and full-precision models on CPU:
 
 ```bash
 python benchmark.py \
-  --config-path /path/to/QWave/config \
+  --config-path /home/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
-  experiment.datasets.esc.csv=/path/to/esc-50.csv \
   experiment.datasets.esc.normalization_type=standard \
+  experiment.datasets.esc.csv=/home/sebasmos/Documents/DATASET/esc-50.csv \
   experiment.device=cpu \
   experiment.models_to_run="[bitnet,esc]" \
-  experiment.metadata.tag=benchmark_bitnet
+  experiment.metadata.tag=benchmark_baselines
 ```
 
 #### 3. Mixture-of-Experts (MoE)
@@ -228,16 +228,16 @@ Run MoE with heterogeneous quantized experts (BitNet, 1-bit, 2-bit, 4-bit, 8-bit
 
 ```bash
 python benchmark.py \
-  --config-path /path/to/QWave/config \
+  --config-path /home/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
   experiment.device=cpu \
-  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.csv=/home/sebasmos/Documents/DATASET/esc-50.csv \
   experiment.datasets.esc.normalization_type=standard \
   experiment.models_to_run=[moe] \
   experiment.router.expert_quantizations="[bitnet,'1','2','4','8','16',qesc]" \
   experiment.router.num_experts=3 \
   experiment.router.top_k=1 \
-  experiment.metadata.tag=esc_moe_heterogeneous
+  experiment.metadata.tag=esc_moe_bitnet_8_16_qesc
 ```
 
 #### 4. MoE with Curiosity (Bayesian Router)
@@ -246,38 +246,23 @@ Enable **curiosity mode** to use a Bayesian Router with Monte Carlo Dropout for 
 
 ```bash
 python benchmark.py \
-  --config-path /path/to/QWave/config \
+  --config-path /home/sebasmos/Desktop/QWave/config \
   --config-name esc50 \
   experiment.device=cpu \
-  experiment.datasets.esc.csv=/path/to/esc-50.csv \
+  experiment.datasets.esc.csv=/home/sebasmos/Documents/DATASET/esc-50.csv \
   experiment.datasets.esc.normalization_type=standard \
   experiment.models_to_run=[moe] \
   experiment.router.expert_quantizations="[bitnet,'1','2','4','8','16',qesc]" \
   experiment.router.num_experts=3 \
   experiment.router.top_k=1 \
   experiment.router.use_curiosity=true \
-  experiment.metadata.tag=esc_moe_curiosity
+  experiment.metadata.tag=esc_moe_bitnet_8_16_qesc_curiosity
 ```
 
 **Curiosity outputs** (saved per fold):
 - `curiosity_values.json` - Raw uncertainty values per sample
 - `curiosity_histogram.png` - Distribution of epistemic uncertainty
 - `curiosity_per_class.png` - Average uncertainty per predicted class
-
-#### 5. GPU Benchmarks
-
-For GPU execution, set `CUDA_VISIBLE_DEVICES` and use `experiment.device=cuda`:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python benchmark.py \
-  --config-path /path/to/QWave/config \
-  --config-name esc50 \
-  experiment.datasets.esc.csv=/path/to/esc-50.csv \
-  experiment.datasets.esc.normalization_type=standard \
-  experiment.device=cuda \
-  experiment.models_to_run="['1','2','4','8','16',esc]" \
-  experiment.metadata.tag=benchmark_baselines_cuda
-```
 
 ---
 
