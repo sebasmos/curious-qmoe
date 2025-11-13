@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "QWave: Quantized Audio Classification Framework"
+title: "QWave: Learning to Route Curiously in Low-Bit Mixture-of-Experts"
 authors:
   - family-names: "Cajas-Ordóñez"
     given-names: "Sebastián Andrés"

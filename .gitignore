@@ -29,8 +29,8 @@ __pycache__/
 *.tiff
 **/*.pt
 *.pt
-#**/*.csv
-#*.csv
+**/*.csv
+*.csv
 **/*.pkl
 *.pkl
 **/*.pth
