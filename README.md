@@ -187,7 +187,7 @@ This project is licensed under the [MIT License](https://github.com/sebasmos/Qua
 
 ```bibtex
 @software{Cajas2025_QWave,
-  author = {Cajas-Ordóñez, Sebastián Andrés and Torres, Luis and Meno, Mackenzie and Lai, Yuan and Durán, Carlos and Celi, Leo Anthony},
+  author = {Cajas Ordóñez, Sebastián Andrés and Torres, Luis and Meno, Mackenzie and Lai, Yuan and Durán, Carlos and Celi, Leo Anthony},
   title = {QWave: Learning to Route Curiously in Low-Bit Mixture-of-Experts},
   year = {2025},
   url = {https://github.com/sebasmos/QWave},
