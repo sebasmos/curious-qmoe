@@ -1,10 +1,10 @@
-[![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sebasmos/quantaudio/blob/main/LICENSE)
+[![LICENSE](https://img.shields.io/badge/license-CC%20BY--NC--SA-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/sebasmos/quantaudio)
 
-# QWave: Learning to Route Curiously in Low-Bit Mixture-of-Experts
+# curious-qmoe: Learning to Route Curiously in Low-Bit Mixture-of-Experts
 
 
-**QWave** is a curiosity-driven quantized Mixture-of-Experts framework for efficient audio classification on resource-constrained edge devices. QWave achieves 99.9% of full-precision accuracy with 4× compression and 82% latency variance reduction through Bayesian epistemic uncertainty-based routing.
+**curious-qmoe** is a curiosity-driven quantized Mixture-of-Experts framework for efficient audio classification on resource-constrained edge devices. curious-qmoe achieves 99.9% of full-precision accuracy with 4× compression and 82% latency variance reduction through Bayesian epistemic uncertainty-based routing.
 
 **Key Features:**
 - **Heterogeneous Quantization**: BitNet ternary, BitLinear (1-16 bit), post-training quantization (PTQ) with bitwise operations
@@ -21,10 +21,10 @@
 ## Setup
 
 ```bash
-conda create -n qwave python=3.11 -y
-conda activate qwave
-git clone https://github.com/sebasmos/qwave.git
-cd qwave
+conda create -n curious-qmoe python=3.11 -y
+conda activate curious-qmoe
+git clone https://github.com/sebasmos/QWave.git
+cd QWave
 pip install -e .
 ```
 
@@ -37,7 +37,7 @@ pip install -e .
 ```bash
 cd scripts
 python benchmark.py \
-  --config-path /path/to/QWave/config \
+  --config-path /path/to/curious-qmoe/config \
   --config-name esc50 \
   experiment.datasets.esc.csv=/path/to/esc-50.csv \
   experiment.device=cpu \
@@ -48,7 +48,7 @@ python benchmark.py \
 
 ```bash
 python benchmark.py \
-  --config-path /path/to/QWave/config \
+  --config-path /path/to/curious-qmoe/config \
   --config-name esc50 \
   experiment.device=cpu \
   experiment.datasets.esc.csv=/path/to/esc-50.csv \
@@ -70,10 +70,10 @@ python benchmark.py \
 ## Project Structure
 
 ```text
-QWave/
+curious-qmoe/
 ├── config/                    # Hydra configs
 │   └── esc50.yaml             # ESC-50 configuration
-├── QWave/                     # Core source code
+├── curious_qmoe/              # Core source code
 │   ├── datasets.py            # EmbeddingDataset and normalization
 │   ├── models.py              # Neural architectures (MLP, ESCModel)
 │   ├── bitnnet.py             # BitNet quantized layers
@@ -179,18 +179,18 @@ experiment:
 
 ## License
 
-This project is licensed under the [MIT License](https://github.com/sebasmos/QuantAudio/blob/main/LICENSE).
+This project is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
 ---
 
 ## Citation
 
 ```bibtex
-@software{Cajas2025_QWave,
+@software{Cajas2025_curious_qmoe,
   author = {Cajas Ordóñez, Sebastián Andrés and Torres, Luis and Meno, Mackenzie and Lai, Yuan and Durán, Carlos and Celi, Leo Anthony},
-  title = {QWave: Learning to Route Curiously in Low-Bit Mixture-of-Experts},
+  title = {curious-qmoe: Learning to Route Curiously in Low-Bit Mixture-of-Experts},
   year = {2025},
   url = {https://github.com/sebasmos/QWave},
-  license = {MIT}
+  license = {CC-BY-NC-SA-4.0}
 }
 ```
