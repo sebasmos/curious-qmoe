@@ -1,3 +1,4 @@
+[![arXiv](https://img.shields.io/badge/arXiv-2512.02646-b31b1b.svg)](https://arxiv.org/pdf/2511.11743)
 [![LICENSE](https://img.shields.io/badge/license-CC%20BY--NC--SA-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/sebasmos/quantaudio)
 
@@ -186,11 +187,10 @@ This project is licensed under the [Creative Commons Attribution-NonCommercial-S
 ## Citation
 
 ```bibtex
-@software{Cajas2025_curious_qmoe,
-  author = {Cajas Ordóñez, Sebastián Andrés and Torres, Luis and Meno, Mackenzie and Lai, Yuan and Durán, Carlos and Celi, Leo Anthony},
-  title = {curious-qmoe: Learning to Route Curiously in Low-Bit Mixture-of-Experts},
-  year = {2025},
-  url = {https://github.com/sebasmos/QWave},
-  license = {CC-BY-NC-SA-4.0}
+@article{ordonez2025uncertainty,
+  title={Uncertainty Makes It Stable: Curiosity-Driven Quantized Mixture-of-Experts},
+  author={Ord{\'o}{\~n}ez, Sebasti{\'a}n Andr{\'e}s Cajas and Torres, Luis Fernando Torres and Meni, Mackenzie J and Paredes, Carlos Andr{\'e}s Duran and Arazo, Eric and Bosch, Cristian and Carbajo, Ricardo Simon and Lai, Yuan and Celi, Leo Anthony},
+  journal={arXiv preprint arXiv:2511.11743},
+  year={2025}
 }
 ```
