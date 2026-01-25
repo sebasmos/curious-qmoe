@@ -265,9 +265,12 @@ def run_cv(csv_path: str, cfg: DictConfig):
             ckpt_path = fold_dir / "best.pth"
 
             # training ───────────────────────────────────────────────────
-            tracker_tr = EmissionsTracker(output_dir=str(fold_dir), output_file="emissions_train.csv",
-                                          project_name=f"{tag}_{model_kind}_fold{fold}_train")
-            t0_train = time.perf_counter(); tracker_tr.start()
+            track_emissions = cfg.experiment.get("track_emissions", False)
+            if track_emissions:
+                tracker_tr = EmissionsTracker(output_dir=str(fold_dir), output_file="emissions_train.csv",
+                                              project_name=f"{tag}_{model_kind}_fold{fold}_train")
+                tracker_tr.start()
+            t0_train = time.perf_counter()
             
             if model_kind == "moe" or model_kind == "qmoe":
                 print(f"Training {model_kind} model...")
@@ -292,16 +295,21 @@ def run_cv(csv_path: str, cfg: DictConfig):
                         str(ckpt_path)
                     )), interval=0.1, retval=True)
 
-            tracker_tr.stop()
+            if track_emissions:
+                tracker_tr.stop()
             dur_tr = time.perf_counter() - t0_train
             
             max_ram_mb_train = float(np.max(mem_train_usage)) if mem_train_usage else 0.0
             all_max_ram_mb_train.append(max_ram_mb_train)
             all_training_durations.append(dur_tr)
             
-            train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
-            for k in cc_metrics_to_track:
-                all_train_cc_data_agg[k].append(train_stats.get(k, 0.0))
+            if track_emissions:
+                train_stats = _load_cc_csv(fold_dir / "emissions_train.csv")
+                for k in cc_metrics_to_track:
+                    all_train_cc_data_agg[k].append(train_stats.get(k, 0.0))
+            else:
+                for k in cc_metrics_to_track:
+                    all_train_cc_data_agg[k].append(0.0)
 
             # reload best & validate ────────────────────────────────────
             final_model = model
@@ -313,9 +321,10 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 final_model.load_state_dict(model_trained.state_dict())
             final_model.eval()
             
-            tracker_val = EmissionsTracker(output_dir=str(fold_dir), output_file="emissions_val.csv",
-                                          project_name=f"{tag}_{model_kind}_fold{fold}_val")
-            tracker_val.start()
+            if track_emissions:
+                tracker_val = EmissionsTracker(output_dir=str(fold_dir), output_file="emissions_val.csv",
+                                              project_name=f"{tag}_{model_kind}_fold{fold}_val")
+                tracker_val.start()
         
             print_size_of_model(final_model, "Original_Model")
 
@@ -374,15 +383,20 @@ def run_cv(csv_path: str, cfg: DictConfig):
                     interval=0.01, retval=True)
                 dur_val = time.perf_counter() - val_start_time
 
-            tracker_val.stop()
-        
+            if track_emissions:
+                tracker_val.stop()
+
             max_ram_mb_val = float(np.max(mem_val_usage)) if mem_val_usage else 0.0
             all_max_ram_mb_val.append(max_ram_mb_val)
             all_validation_durations.append(dur_val)
 
-            val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
-            for k in cc_metrics_to_track:
-                all_val_cc_data_agg[k].append(val_stats.get(k, 0.0))
+            if track_emissions:
+                val_stats = _load_cc_csv(fold_dir / "emissions_val.csv")
+                for k in cc_metrics_to_track:
+                    all_val_cc_data_agg[k].append(val_stats.get(k, 0.0))
+            else:
+                for k in cc_metrics_to_track:
+                    all_val_cc_data_agg[k].append(0.0)
 
             final_accuracy = accuracy_score(y_true, y_pred)
             final_f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
@@ -408,9 +422,14 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 "training_flops": float(training_flops),
                 "validation_flops": float(validation_flops)
             }
-            for k in cc_metrics_to_track:
-                fold_result[f"train_{k}"] = train_stats.get(k, 0.0)
-                fold_result[f"val_{k}"] = val_stats.get(k, 0.0)
+            if track_emissions:
+                for k in cc_metrics_to_track:
+                    fold_result[f"train_{k}"] = train_stats.get(k, 0.0)
+                    fold_result[f"val_{k}"] = val_stats.get(k, 0.0)
+            else:
+                for k in cc_metrics_to_track:
+                    fold_result[f"train_{k}"] = 0.0
+                    fold_result[f"val_{k}"] = 0.0
 
             with open(fold_dir/"metrics.json", "w") as fp:
                 json.dump(fold_result, fp, indent=4)
