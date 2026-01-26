@@ -34,6 +34,21 @@ class qMoEModelBatched(nn.Module):
             self.use_curiosity = False
 
         # ──────────────────────────────────────────────────────────────
+        # Curiosity parameters (for modifying routing probabilities)
+        # ──────────────────────────────────────────────────────────────
+        self.curiosity_alpha = getattr(cfg.experiment.router, "curiosity_alpha", 0.1)
+        self.curiosity_strategy = getattr(cfg.experiment.router, "curiosity_strategy", "entropy_regularization")
+
+        # Validate strategy
+        valid_strategies = ["kl_divergence", "entropy_regularization"]
+        if self.use_curiosity and self.curiosity_strategy not in valid_strategies:
+            raise ValueError(f"Invalid curiosity_strategy: {self.curiosity_strategy}. "
+                             f"Must be one of {valid_strategies}")
+
+        if self.use_curiosity:
+            print(f"[MoE] Curiosity enabled: strategy='{self.curiosity_strategy}', α={self.curiosity_alpha}")
+
+        # ──────────────────────────────────────────────────────────────
         # Expert initialization
         # ──────────────────────────────────────────────────────────────
         expert_quantizations = cfg.experiment.router.expert_quantizations
@@ -132,13 +147,17 @@ class qMoEModelBatched(nn.Module):
 
         # Router
         if isinstance(self.router, BayesianRouter):
-            router_out, curiosity = self.router(
+            router_out, uncertainty = self.router(
                 x, compute_uncertainty=self.use_curiosity
             )
         else:
-            router_out, curiosity = self.router(x), None
+            router_out, uncertainty = self.router(x), None
 
-        router_p = F.softmax(router_out, dim=1)  # (B, E)
+        # CURIOSITY MECHANISM: Modify routing probabilities based on uncertainty
+        if self.use_curiosity and uncertainty is not None:
+            router_p = self._apply_curiosity(router_out, uncertainty)
+        else:
+            router_p = F.softmax(router_out, dim=1)  # Standard routing
         k_val, k_idx = torch.topk(router_p, self.top_k, dim=1)  # (B, K)
 
         out = x.new_zeros(B, self.num_classes)
@@ -161,7 +180,70 @@ class qMoEModelBatched(nn.Module):
         out = out / self.top_k
 
         # Return 4-tuple (backward-compatible callers can ignore the 4th)
-        return out, router_p, lb_loss, curiosity
+        return out, router_p, lb_loss, uncertainty
+
+    def _apply_curiosity(self, router_logits: torch.Tensor, uncertainty: torch.Tensor) -> torch.Tensor:
+        """
+        Apply curiosity-driven routing modification based on epistemic uncertainty.
+
+        Args:
+            router_logits: Raw router outputs (B, E)
+            uncertainty: Epistemic uncertainty per sample (B,)
+
+        Returns:
+            router_p: Modified routing probabilities (B, E)
+        """
+        router_p_base = F.softmax(router_logits, dim=1)  # (B, E)
+
+        # ============================================================
+        # Strategy 1: KL Divergence (Paper's Equation 8)
+        # ============================================================
+        if self.curiosity_strategy == "kl_divergence":
+            # p^curious_i ∝ pi · exp(α · KL(pi||p̄))
+            # Reference distribution (uniform)
+            p_uniform = torch.ones_like(router_p_base) / router_p_base.shape[1]
+
+            # KL divergence: KL(P||Q) = sum(P * log(P/Q))
+            # Higher KL = more confident/peaked distribution
+            kl_per_expert = router_p_base * (
+                (router_p_base + 1e-8).log() - (p_uniform + 1e-8).log()
+            )
+            kl_div = kl_per_expert.sum(dim=1, keepdim=True)  # (B, 1)
+
+            # Apply curiosity bonus (exploration for confident routing)
+            curiosity_bonus = torch.exp(self.curiosity_alpha * kl_div)
+            router_p = router_p_base * curiosity_bonus
+            router_p = router_p / router_p.sum(dim=1, keepdim=True)
+
+            return router_p
+
+        # ============================================================
+        # Strategy 2: Entropy Regularization
+        # ============================================================
+        elif self.curiosity_strategy == "entropy_regularization":
+            # Routing entropy: H(p) = -sum(p * log(p))
+            entropy = -(router_p_base * (router_p_base + 1e-8).log()).sum(dim=1, keepdim=True)
+
+            # Normalize uncertainty to [0, 1]
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return router_p_base
+
+            u_norm = (uncertainty - u_min) / (u_max - u_min + 1e-8)
+            u_norm = u_norm.unsqueeze(1).clamp(0, 1)
+
+            # Sharpening factor: high uncertainty + high entropy → sharpen distribution
+            # Intuition: uncertain samples with diffuse routing should commit more
+            sharpening = 1.0 + self.curiosity_alpha * u_norm * entropy
+
+            router_p = router_p_base * sharpening
+            router_p = router_p / (router_p.sum(dim=1, keepdim=True) + 1e-8)
+
+            return router_p
+
+        else:
+            # Unknown strategy, return base routing
+            return router_p_base
 
 
 class Router(nn.Module):

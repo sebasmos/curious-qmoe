@@ -25,7 +25,10 @@ dependencies = [
     "psutil",
     "numpy==2.2.5",
     "timm==1.0.15",
-    "transformers"
+    "transformers",
+    "codecarbon",
+    "memory_profiler",
+    "fvcore"
 ]
 
 classifiers = [

@@ -57,3 +57,6 @@ __pycache__/
 *.tfrecord
 #**/.csv
 #*.csv
+docs-temp/
+outputs/
+RESULTS-paper/

@@ -1,0 +1,43 @@
+Metadata-Version: 2.4
+Name: qwave
+Version: 0.1.0
+Author-email: Sebastian Cajas <sebasmos@mit.edu>
+Project-URL: Repository, https://github.com/sebasmos/QWave
+Project-URL: Bug Tracker, https://github.com/sebasmos/QWave/issues
+Keywords: machine learning,vector embeddings,quantization
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+License-File: LICENSE
+Requires-Dist: scikit-learn==1.6.1
+Requires-Dist: tabulate==0.9.0
+Requires-Dist: pandas==2.2.3
+Requires-Dist: matplotlib==3.10.1
+Requires-Dist: seaborn==0.13.2
+Requires-Dist: sympy<1.14,>=1.13.3
+Requires-Dist: joblib==1.4.2
+Requires-Dist: setuptools==75.1.0
+Requires-Dist: scipy==1.14.1
+Requires-Dist: clip @ git+https://github.com/openai/CLIP.git
+Requires-Dist: ftfy
+Requires-Dist: regex
+Requires-Dist: tqdm==4.67.1
+Requires-Dist: hydra-core==1.3.2
+Requires-Dist: omegaconf==2.3.0
+Requires-Dist: torch==2.7.0
+Requires-Dist: torchvision==0.22.0
+Requires-Dist: Pillow==11.2.1
+Requires-Dist: psutil
+Requires-Dist: numpy==2.2.5
+Requires-Dist: timm==1.0.15
+Requires-Dist: transformers
+Requires-Dist: codecarbon
+Requires-Dist: memory_profiler
+Requires-Dist: fvcore
+Dynamic: license-file

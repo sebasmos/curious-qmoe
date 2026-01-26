@@ -11,6 +11,7 @@ hydra:
 experiment:
   models_to_run: [esc]
   device: "mps"  # or "cuda", "mps", or "cpu"
+  track_emissions: false  # Set to true to enable carbon tracking (requires sudo on macOS)
   datasets:
     esc:
       csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
@@ -51,6 +52,9 @@ experiment:
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
     diversity_loss_alpha: 1e-3  # New parameter for diversity loss
     use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for epistemic uncertainty estimation
+    curiosity_strategy: "entropy_regularization"  # Options: "kl_divergence", "entropy_regularization"
+    curiosity_alpha: 0.1  # Exploration strength hyperparameter (α in Equation 8)
+    mc_samples: 10  # Monte Carlo samples for uncertainty estimation
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     

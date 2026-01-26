@@ -87,7 +87,6 @@ curious-qmoe/
 ├── scripts/
 │   ├── benchmark.py           # Main benchmarking pipeline
 │   └── tables/                # Results analysis scripts
-│       ├── organize-results.py      # Combine CSV results
 │       ├── analyze-std.py           # Generate tables with mean±std
 │       ├── analyze-significance.py  # Statistical testing (t-tests, Levene)
 │       └── README-significance.md   # Model nomenclature reference
@@ -101,15 +100,7 @@ curious-qmoe/
 
 After running experiments, analyze results with the scripts in `scripts/tables/`:
 
-### 1. Organize Results
-Combine CSV files from multiple experiments:
-
-```bash
-cd scripts/tables
-python organize-results.py  # Edit dataset path in script
-```
-
-### 2. Generate Tables (mean±std)
+### 1. Generate Tables (mean±std)
 Create 5 tables with mean±std from 5-fold cross-validation:
 
 ```bash
@@ -118,7 +109,7 @@ python analyze-std.py
 
 **Output:** `tables-std/` folder with 4 main tables + 1 supplementary
 
-### 3. Statistical Significance Testing
+### 2. Statistical Significance Testing
 Run paired t-tests and variance tests:
 
 ```bash

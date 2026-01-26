@@ -1,10 +1,17 @@
+"""
+Analyze results across all datasets
+"""
+
+
 import pandas as pd
 import numpy as np
 import json
 from pathlib import Path
 
 script_dir = Path(__file__).parent
-results_base = Path(r"C:\Users\sebastian.cajasordon\Downloads\RESULTS-paper")
+# results_base = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS")
+results_base = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS")
+
 tables_std_dir = script_dir / "tables-std"
 tables_std_dir.mkdir(exist_ok=True)
 
