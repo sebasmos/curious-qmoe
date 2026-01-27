@@ -186,23 +186,25 @@ def build_q4_model(in_dim=1536, num_classes=50, device="cpu") -> BitNetExpert:
 
 
 def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10) -> qMoEModelBatched:
-    """Create MoE model with Bayesian router."""
+    """Create MoE model with Bayesian router and KL divergence curiosity."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({
         "experiment": {
             "router": {
                 "hidden_dim": 128,
-                "expert_quantizations": [1, 2, 4, 16],
-                "num_experts": 4,
+                "expert_quantizations": ['bitnet', '4', '8'],  # FIXED: Match validated 5-fold CV config
+                "num_experts": 3,  # FIXED: 3 experts (bitnet, 4-bit, 8-bit)
                 "top_k": 1,
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
+                "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
+                "curiosity_alpha": 0.1,  # ADDED: Curiosity strength parameter
                 "mc_samples": mc_samples,
             },
             "model": {"hidden_sizes": [640, 320], "dropout_prob": 0.2},
         }
     })
-    return qMoEModelBatched(cfg, in_dim, num_classes, 4, 1).to(device)
+    return qMoEModelBatched(cfg, in_dim, num_classes, 3, 1).to(device)  # num_experts=3, top_k=1
 
 
 def build_router(in_dim=1536, num_experts=4, mc_samples=10, device="cpu") -> BayesianRouter:
