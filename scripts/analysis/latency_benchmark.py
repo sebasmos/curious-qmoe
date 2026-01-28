@@ -9,6 +9,15 @@ Measures:
 
 Tasks 1.1 & 1.2 from CVPR 2026 rebuttal.
 
+CVPR 2026 Rebuttal Command:
+    cd scripts
+    python analysis/latency_benchmark.py \
+        --csv /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv \
+        --num-passes 100 \
+        --mc-samples 10 \
+        --device cpu \
+        --curiosity-alpha 0.02
+
 Usage:
     python scripts/analysis/latency_benchmark.py --synthetic --num-passes 100
     python scripts/analysis/latency_benchmark.py --csv /path/to/data.csv

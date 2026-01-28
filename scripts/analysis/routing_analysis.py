@@ -7,6 +7,17 @@ Analyzes expert routing patterns and generates visualizations.
 
 Task 2.2 from CVPR 2026 rebuttal.
 
+CVPR 2026 Rebuttal Command:
+    cd scripts
+    python analysis/routing_analysis.py \
+        --csv /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv \
+        --checkpoint ../outputs/full_kl_divergence_final-0.02/moe/fold_1/best.pth \
+        --device cpu \
+        --curiosity-alpha 0.02 \
+        --mc-samples 10 \
+        --num-classes 5 \
+        --expert-names BitNet Q4 Q8
+
 Usage:
     python scripts/analysis/routing_analysis.py --synthetic
     python scripts/analysis/routing_analysis.py --csv /path/to/data.csv
