@@ -198,7 +198,7 @@ def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10) ->
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
                 "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
-                "curiosity_alpha": 0.1,  # ADDED: Curiosity strength parameter
+                "curiosity_alpha": 0.02,  # ADDED: Curiosity strength parameter
                 "mc_samples": mc_samples,
             },
             "model": {"hidden_sizes": [640, 320], "dropout_prob": 0.2},
@@ -215,7 +215,13 @@ def build_router(in_dim=1536, num_experts=4, mc_samples=10, device="cpu") -> Bay
 def run_benchmark(args):
     """Run full benchmark."""
     device = torch.device(args.device)
-    output_dir = Path(args.output_dir)
+
+    # Make output_dir relative to repository root, not current working directory
+    if not Path(args.output_dir).is_absolute():
+        output_dir = ROOT / args.output_dir
+    else:
+        output_dir = Path(args.output_dir)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Data
@@ -271,7 +277,7 @@ def main():
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic data")
     parser.add_argument("--csv", type=str, help="Path to data CSV")
     parser.add_argument("--num-passes", type=int, default=100)
-    parser.add_argument("--output-dir", type=str, default="outputs/analysis")
+    parser.add_argument("--output-dir", type=str, default="outputs/rebuttal_latency")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--in-dim", type=int, default=1536)
     parser.add_argument("--num-classes", type=int, default=50)
