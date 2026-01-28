@@ -107,12 +107,12 @@ python benchmark.py \
   'experiment.models_to_run=[moe]' \
   experiment.router.use_curiosity=true \
   experiment.router.curiosity_strategy=kl_divergence \
-  experiment.router.curiosity_alpha=0.1 \
+  experiment.router.curiosity_alpha=0.02 \
   'experiment.router.expert_quantizations=[bitnet,4,8]' \
   experiment.router.num_experts=3 \
   experiment.router.top_k=1 \
   experiment.cross_validation.n_splits=5 \
-  experiment.metadata.tag=full_kl_divergence_final
+  experiment.metadata.tag=full_kl_divergence_final-0.02
 
 echo ""
 echo "KL Divergence experiment complete!"
