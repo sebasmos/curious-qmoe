@@ -93,37 +93,8 @@ echo ""
 # ============================================================
 # Experiment 2: KL Divergence (Paper's Equation 8) - WINNER
 # ============================================================
-echo "=================================="
-echo "Running Experiment 2/3: KL Divergence (Paper's Equation 8) ⭐"
-echo "Expected F1: 0.7832 ± 0.0210 (+1.23% vs baseline)"
-echo "=================================="
-echo ""
-
-python benchmark.py \
-  --config-path "$CONFIG_PATH" \
-  --config-name esc50 \
-  experiment.datasets.esc.csv="$DATASET_CSV" \
-  experiment.device=$DEVICE \
-  'experiment.models_to_run=[moe]' \
-  experiment.router.use_curiosity=true \
-  experiment.router.curiosity_strategy=kl_divergence \
-  experiment.router.curiosity_alpha=0.02 \
-  'experiment.router.expert_quantizations=[bitnet,4,8]' \
-  experiment.router.num_experts=3 \
-  experiment.router.top_k=1 \
-  experiment.cross_validation.n_splits=5 \
-  experiment.metadata.tag=full_kl_divergence_final-0.02
-
-echo ""
-echo "KL Divergence experiment complete!"
-echo ""
-
-# # ============================================================
-# # Experiment 3: Entropy Regularization
-# # ============================================================
 # echo "=================================="
-# echo "Running Experiment 3/3: Entropy Regularization"
-# echo "Expected F1: 0.7670 ± 0.0297 (-0.86% vs baseline)"
+# echo "Running Experiment 2/3: KL Divergence (Paper's Equation 8) ⭐"
 # echo "=================================="
 # echo ""
 
@@ -134,25 +105,53 @@ echo ""
 #   experiment.device=$DEVICE \
 #   'experiment.models_to_run=[moe]' \
 #   experiment.router.use_curiosity=true \
-#   experiment.router.curiosity_strategy=entropy_regularization \
-#   experiment.router.curiosity_alpha=0.1 \
+#   experiment.router.curiosity_strategy=kl_divergence \
+#   experiment.router.curiosity_alpha=0.02 \
 #   'experiment.router.expert_quantizations=[bitnet,4,8]' \
 #   experiment.router.num_experts=3 \
 #   experiment.router.top_k=1 \
 #   experiment.cross_validation.n_splits=5 \
-#   experiment.metadata.tag=full_entropy_regularization_final
+#   experiment.metadata.tag=full_kl_divergence_final-0.02
 
 # echo ""
-# echo "=================================="
-# echo "All experiments complete!"
-# echo "=================================="
+# echo "KL Divergence experiment complete!"
 # echo ""
-# echo "Results saved to:"
-# echo "  - ${OUTPUT_DIR}/full_baseline_final/moe/summary.json"
-# echo "  - ${OUTPUT_DIR}/full_kl_divergence_final/moe/summary.json"
-# echo "  - ${OUTPUT_DIR}/full_entropy_regularization_final/moe/summary.json"
-# echo ""
-# echo "To analyze results, run:"
-# echo "  cd ${SCRIPTS_DIR}/tables"
-# echo "  python analyze-curiosity-results.py"
-# echo ""
+
+# ============================================================
+# Experiment 3: Entropy Regularization
+# ============================================================
+echo "=================================="
+echo "Running Experiment 3/3: Entropy Regularization"
+echo "Expected F1: 0.7670 ± 0.0297 (-0.86% vs baseline)"
+echo "=================================="
+echo ""
+
+python benchmark.py \
+  --config-path "$CONFIG_PATH" \
+  --config-name esc50 \
+  experiment.datasets.esc.csv="$DATASET_CSV" \
+  experiment.device=$DEVICE \
+  'experiment.models_to_run=[moe]' \
+  experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=entropy_regularization \
+  experiment.router.curiosity_alpha=0.1 \
+  'experiment.router.expert_quantizations=[bitnet,4,8]' \
+  experiment.router.num_experts=3 \
+  experiment.router.top_k=1 \
+  experiment.cross_validation.n_splits=5 \
+  experiment.metadata.tag=full_entropy_regularization_final
+
+echo ""
+echo "=================================="
+echo "All experiments complete!"
+echo "=================================="
+echo ""
+echo "Results saved to:"
+echo "  - ${OUTPUT_DIR}/full_baseline_final/moe/summary.json"
+echo "  - ${OUTPUT_DIR}/full_kl_divergence_final/moe/summary.json"
+echo "  - ${OUTPUT_DIR}/full_entropy_regularization_final/moe/summary.json"
+echo ""
+echo "To analyze results, run:"
+echo "  cd ${SCRIPTS_DIR}/tables"
+echo "  python analyze-curiosity-results.py"
+echo ""
