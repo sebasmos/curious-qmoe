@@ -62,7 +62,7 @@ def extract_routing(
 ) -> Tuple[List[RoutingInfo], Dict[int, ExpertSummary]]:
     """Extract routing decisions from MoE model."""
     if expert_names is None:
-        expert_names = ["1-bit", "2-bit", "4-bit", "16-bit"]
+        expert_names = ["BitNet", "Q4", "Q8"]
 
     model.eval()
     device = next(model.parameters()).device
@@ -160,30 +160,40 @@ def plot_confidence_by_expert(summaries: Dict[int, ExpertSummary], output: Path)
     print(f"Saved {output}")
 
 
-def build_moe(in_dim=1536, num_classes=50, device="cpu") -> qMoEModelBatched:
-    """Create MoE model."""
+def build_moe(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02) -> qMoEModelBatched:
+    """Create MoE model with correct configuration matching latency_benchmark.py."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({
         "experiment": {
             "router": {
                 "hidden_dim": 128,
-                "expert_quantizations": [1, 2, 4, 16],
-                "num_experts": 4,
+                "expert_quantizations": ['bitnet', '4', '8'],  # CRITICAL: Match validated 5-fold CV
+                "num_experts": 3,
                 "top_k": 1,
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
-                "mc_samples": 10,
+                "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
+                "curiosity_alpha": curiosity_alpha,  # Curiosity strength parameter
+                "mc_samples": mc_samples,
             },
             "model": {"hidden_sizes": [640, 320], "dropout_prob": 0.2},
         }
     })
-    return qMoEModelBatched(cfg, in_dim, num_classes, 4, 1).to(device)
+    return qMoEModelBatched(cfg, in_dim, num_classes, 3, 1).to(device)  # num_experts=3, top_k=1
 
 
 def run_analysis(args):
     """Run routing analysis."""
     device = torch.device(args.device)
-    output_dir = Path(args.output_dir)
+    
+    # Compute output directory based on curiosity_alpha if not explicitly set (matches latency_benchmark.py)
+    if args.output_dir is None:
+        output_dir = ROOT / "scripts" / "analysis" / f"outputs-{args.curiosity_alpha}" / "rebuttal_routing"
+    elif not Path(args.output_dir).is_absolute():
+        output_dir = ROOT / args.output_dir
+    else:
+        output_dir = Path(args.output_dir)
+    
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Data
@@ -197,8 +207,8 @@ def run_analysis(args):
         data = torch.tensor(df[cols].values, dtype=torch.float32)
         labels = torch.tensor(df["class_id"].values) if "class_id" in df else None
 
-    # Model
-    model = build_moe(args.in_dim, args.num_classes, device)
+    # Model - use correct configuration matching latency_benchmark.py
+    model = build_moe(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha)
     if args.checkpoint:
         model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
@@ -214,14 +224,26 @@ def run_analysis(args):
     plot_routing_distribution(summaries, output_dir / "routing_distribution.png")
     plot_confidence_by_expert(summaries, output_dir / "confidence_by_expert.png")
 
-    # Save data
-    with open(output_dir / "routing_data.json", "w") as f:
-        json.dump({
-            "routing": [asdict(r) for r in routing[:100]],
-            "summaries": {str(k): asdict(v) for k, v in summaries.items()},
-        }, f, indent=2)
+    # Save data (same structure as latency_benchmark.py)
+    results = {
+        "config": {
+            "curiosity_alpha": args.curiosity_alpha,
+            "mc_samples": args.mc_samples,
+            "expert_names": args.expert_names,
+            "num_samples": len(routing),
+            "checkpoint": args.checkpoint,
+        },
+        "routing": [asdict(r) for r in routing[:100]],  # First 100 for brevity
+        "summaries": {str(k): asdict(v) for k, v in summaries.items()},
+    }
+    
+    with open(output_dir / "routing_results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
     print(f"\nResults saved to {output_dir}")
+    print(f"  - routing_results.json")
+    print(f"  - routing_distribution.png")
+    print(f"  - confidence_by_expert.png")
 
 
 def main():
@@ -229,13 +251,21 @@ def main():
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--csv", type=str)
     parser.add_argument("--checkpoint", type=str)
-    parser.add_argument("--output-dir", type=str, default="outputs/analysis")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Output directory (default: outputs-{alpha}/rebuttal_routing)")
+    parser.add_argument("--curiosity-alpha", type=float, default=0.02,
+                        help="Curiosity strength alpha value")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--in-dim", type=int, default=1536)
     parser.add_argument("--num-classes", type=int, default=50)
-    parser.add_argument("--expert-names", nargs="+", default=["1-bit", "2-bit", "4-bit", "16-bit"])
+    parser.add_argument("--mc-samples", type=int, default=10)
+    parser.add_argument("--expert-names", nargs="+", default=["BitNet", "Q4", "Q8"])
 
     args = parser.parse_args()
+    
+    if not args.synthetic and not args.csv:
+        parser.error("Provide --synthetic or --csv")
+    
     run_analysis(args)
 
 
