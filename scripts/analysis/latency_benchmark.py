@@ -185,7 +185,7 @@ def build_q4_model(in_dim=1536, num_classes=50, device="cpu") -> BitNetExpert:
     return BitNetExpert(in_dim, num_classes, [640, 320], 0.2, num_bits=4).to(device)
 
 
-def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10) -> qMoEModelBatched:
+def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02) -> qMoEModelBatched:
     """Create MoE model with Bayesian router and KL divergence curiosity."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({
@@ -198,7 +198,7 @@ def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10) ->
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
                 "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
-                "curiosity_alpha": 0.02,  # ADDED: Curiosity strength parameter
+                "curiosity_alpha": curiosity_alpha,  # Curiosity strength parameter
                 "mc_samples": mc_samples,
             },
             "model": {"hidden_sizes": [640, 320], "dropout_prob": 0.2},
@@ -216,8 +216,10 @@ def run_benchmark(args):
     """Run full benchmark."""
     device = torch.device(args.device)
 
-    # Make output_dir relative to repository root, not current working directory
-    if not Path(args.output_dir).is_absolute():
+    # Compute output directory based on curiosity_alpha if not explicitly set
+    if args.output_dir is None:
+        output_dir = ROOT / "scripts" / "analysis" / f"outputs-{args.curiosity_alpha}" / "rebuttal_latency"
+    elif not Path(args.output_dir).is_absolute():
         output_dir = ROOT / args.output_dir
     else:
         output_dir = Path(args.output_dir)
@@ -235,7 +237,7 @@ def run_benchmark(args):
 
     # Models
     q4 = build_q4_model(args.in_dim, args.num_classes, device)
-    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples)
+    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha)
     router = build_router(args.in_dim, 4, args.mc_samples, device)
 
     # Measure latency
@@ -277,7 +279,10 @@ def main():
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic data")
     parser.add_argument("--csv", type=str, help="Path to data CSV")
     parser.add_argument("--num-passes", type=int, default=100)
-    parser.add_argument("--output-dir", type=str, default="outputs/rebuttal_latency")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Output directory (default: outputs-{alpha}/rebuttal_latency)")
+    parser.add_argument("--curiosity-alpha", type=float, default=0.02,
+                        help="Curiosity strength alpha value")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--in-dim", type=int, default=1536)
     parser.add_argument("--num-classes", type=int, default=50)
