@@ -237,7 +237,7 @@ def run_benchmark(args):
 
     # Models
     q4 = build_q4_model(args.in_dim, args.num_classes, device)
-    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha)
+    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.alpha)
     router = build_router(args.in_dim, 4, args.mc_samples, device)
 
     # Measure latency
@@ -287,6 +287,7 @@ def main():
     parser.add_argument("--in-dim", type=int, default=1536)
     parser.add_argument("--num-classes", type=int, default=50)
     parser.add_argument("--mc-samples", type=int, default=10)
+    parser.add_argument("--alpha", type=float, default=0.02, help="Curiosity alpha parameter")
 
     args = parser.parse_args()
 
