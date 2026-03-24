@@ -10,7 +10,7 @@ from pathlib import Path
 
 script_dir = Path(__file__).parent
 # results_base = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS")
-results_base = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS")
+results_base = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper")
 
 tables_std_dir = script_dir / "tables-std"
 tables_std_dir.mkdir(exist_ok=True)

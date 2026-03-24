@@ -100,19 +100,35 @@ curious-qmoe/
 
 After running experiments, analyze results with the scripts in `scripts/tables/`:
 
-### 1. Generate Tables (mean±std)
+### 1. Verify Paper Numbers
+Deterministic verification of all MoE-related numbers against paper tables:
+
+```bash
+python scripts/tables/verify_paper_tables.py
+```
+
+**Output:** Per-value comparison with OK/MISMATCH status for Tables 1, 3, 4, 5, and prose claims.
+
+### 2. Generate Tables (mean±std)
 Create 5 tables with mean±std from 5-fold cross-validation:
 
 ```bash
+cd scripts/tables
 python analyze-std.py
 ```
 
-**Output:** `tables-std/` folder with 4 main tables + 1 supplementary
+**Output:** `tables-std/` folder with 5 CSV files:
+- `table1-cross_dataset_performance_std.csv` (Table 1)
+- `table2-ablation_quantization_std.csv` (Table 2)
+- `table3-moe_curiosity_std.csv` (Table 3)
+- `table4-inference_latency_std.csv` (Table 4)
+- `supplementary-carbon_emissions_std.csv` (Supplementary)
 
-### 2. Statistical Significance Testing
+### 3. Statistical Significance Testing
 Run paired t-tests and variance tests:
 
 ```bash
+cd scripts/tables
 python analyze-significance.py
 ```
 
@@ -166,6 +182,108 @@ experiment:
 - **1-bit to 16-bit**: Symmetric quantization with scale factors
 - **BitNet**: Ternary weights {-1, 0, 1} with per-channel scaling
 - **qesc**: Bitwise popcount with 2-bit ternary encoding
+
+---
+
+## Reproducing ECCV 2026 Paper Results
+
+All MoE-C (curiosity routing) experiments use corrected Eq. 8 implementation. Results are in `outputs/` and `docs-temp/eccv-paper/results/`.
+
+### Datasets
+
+- **ESC-50**: `/path/to/ESC-50/efficientnet_1536/esc-50.csv`
+- **Quinn**: `/path/to/Quinn/efficientnet_ABGQI/ABGQI_embeddings_torch.csv`
+- **UrbanSound8K**: `/path/to/Urban8k/efficientnet/urbansound8k.csv`
+
+### 3-Expert MoE-C (BitNet-Q4/8-QMoE-C, Table 1 main config)
+
+```bash
+# Baseline (no curiosity) — per dataset
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', 4, 8]" \
+  experiment.router.num_experts=3 experiment.router.use_curiosity=false \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_baseline
+
+# Curiosity α=0.2
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', 4, 8]" \
+  experiment.router.num_experts=3 experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=kl_divergence \
+  experiment.router.curiosity_alpha=0.2 experiment.router.mc_samples=10 \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_alpha_020
+
+# Curiosity α=0.3
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', 4, 8]" \
+  experiment.router.num_experts=3 experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=kl_divergence \
+  experiment.router.curiosity_alpha=0.3 experiment.router.mc_samples=10 \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_alpha_030
+```
+
+### 4-Expert MoE-C (BitNet-Q4/8/16-QMoE-C)
+
+```bash
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', 4, 8, 16]" \
+  experiment.router.num_experts=4 experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=kl_divergence \
+  experiment.router.curiosity_alpha=0.3 experiment.router.mc_samples=10 \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_bitnet_4_8_16_curiosity
+```
+
+### PTQ MoE-C Variants
+
+```bash
+# BitNet-Q8/16-PTQ-QMoE-C (4 experts: bitnet, 8, 16, qesc)
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', '8', '16', 'qesc']" \
+  experiment.router.num_experts=4 experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=kl_divergence \
+  experiment.router.curiosity_alpha=0.3 experiment.router.mc_samples=10 \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_bitnet_8_16_qesc_curiosity
+
+# BitNet-Q8PTQ-QMoE-C (2 experts: bitnet, qesc)
+python scripts/qMoE/qmoe.py \
+  --config-path /path/to/curious-qmoe/config --config-name esc50 \
+  "experiment.router.expert_quantizations=['bitnet', 'qesc']" \
+  experiment.router.num_experts=2 experiment.router.use_curiosity=true \
+  experiment.router.curiosity_strategy=kl_divergence \
+  experiment.router.curiosity_alpha=0.3 experiment.router.mc_samples=10 \
+  experiment.datasets.esc.csv=/path/to/dataset.csv \
+  experiment.device=cpu experiment.metadata.tag=<dataset>_bitnet_qesc_curiosity
+```
+
+### Generate Rebuttal Figure
+
+```bash
+python scripts/analysis/generate_rebuttal_figure.py \
+  --routing-json outputs-rebuttal/analysis/outputs-0.2/rebuttal_routing/routing_results.json \
+  --output docs-temp/eccv-paper/figs/rebuttal_confidence_distribution.pdf
+```
+
+### Output Tags → Paper Model Names
+
+| Tag pattern | Paper name |
+|-------------|-----------|
+| `*_baseline` | Baseline MoE (uniform routing) |
+| `*_alpha_020` | BitNet-Q4/8-QMoE-C (α=0.2) |
+| `*_alpha_030` | BitNet-Q4/8-QMoE-C (α=0.3) |
+| `*_bitnet_4_8_16_curiosity` | BitNet-Q4/8/16-QMoE-C |
+| `*_bitnet_8_16_qesc_curiosity` | BitNet-Q8/16-PTQ-QMoE-C |
+| `*_bitnet_qesc_curiosity` | BitNet-Q8PTQ-QMoE-C |
+
+Each experiment outputs `summary.json` with `f1_mean`, `f1_std`, per-fold results, carbon emissions, and timing data.
 
 ---
 

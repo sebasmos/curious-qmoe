@@ -5,7 +5,7 @@ from pathlib import Path
 from scipy import stats
 
 script_dir = Path(__file__).parent
-results_dir = Path(r"C:\Users\sebastian.cajasordon\Downloads\RESULTS-paper")
+results_dir = Path(r"/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper")
 output_dir = script_dir / "significance-tests"
 output_dir.mkdir(exist_ok=True)
 
