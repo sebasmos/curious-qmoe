@@ -631,7 +631,11 @@ class BayesianRouter(nn.Module):
         predictions = torch.stack(preds, dim=0)  # (mc, B, E)
         mean_pred = predictions.mean(dim=0)      # (B, E)
         # Epistemic uncertainty: aggregate variance across experts
-        uncertainty = predictions.var(dim=0).sum(dim=1)  # (B,)
+        # Population variance (unbiased=False): with mc_samples=1 the unbiased
+        # estimator divides by zero and yields NaN uncertainty, which crashed
+        # downstream plotting; a single pass now gives zero uncertainty, and
+        # uncertainty-consuming strategies correctly fall back to base routing.
+        uncertainty = predictions.var(dim=0, unbiased=False).sum(dim=1)  # (B,)
 
         # Return logits consistent with routing path (use mean logits proxy via log-softmax inverse)
         # Safer: re-run a single pass for logits to keep numerical path identical

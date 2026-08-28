@@ -257,6 +257,21 @@ def test_all_strategies_preserve_normalization():
         print(f"✓ Strategy '{strategy}' preserves normalization across alphas")
 
 
+def test_mc_samples_one_gives_finite_zero_uncertainty():
+    """mc_samples=1 must yield zero (not NaN) uncertainty, so the pipeline
+    degrades gracefully to base routing instead of crashing downstream."""
+    torch.manual_seed(9)
+    cfg = create_test_config("precision_prior", alpha=1.0)
+    cfg.experiment.router.mc_samples = 1
+    model = qMoEModelBatched(cfg, in_dim=1536, num_classes=50, num_experts=2, top_k=1)
+    model.eval()
+    x = torch.randn(8, 1536)
+    _, _, _, uncertainty = model(x)
+    assert torch.isfinite(uncertainty).all(), "mc_samples=1 produced non-finite uncertainty"
+    assert (uncertainty == 0).all(), "single-pass uncertainty should be exactly zero"
+    print("✓ mc_samples=1 yields finite zero uncertainty (graceful fallback)")
+
+
 def test_forward_pass_end_to_end():
     """Full forward pass with curiosity on returns the 4-tuple and valid shapes."""
     model = make_model("kl_divergence", alpha=0.3)
@@ -279,5 +294,6 @@ if __name__ == "__main__":
     test_precision_prior_routes_uncertain_to_high_precision()
     test_new_strategies_route_uncertain_to_high_precision()
     test_all_strategies_preserve_normalization()
+    test_mc_samples_one_gives_finite_zero_uncertainty()
     test_forward_pass_end_to_end()
     print("\n=== All Tests Passed! ===")
