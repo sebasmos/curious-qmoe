@@ -3,7 +3,7 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 import torch.nn.functional as F
 from .models import ESCModel, reset_weights
-from .qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert
+from .qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert, SharedTrunkMoE
 
 
 class qMoEModelBatched(nn.Module):
@@ -80,8 +80,29 @@ class qMoEModelBatched(nn.Module):
         expert_quantizations = cfg.experiment.router.expert_quantizations
         print(f"Initializing experts with quantizations: {expert_quantizations}")
 
+        # Efficiency option: experts share one quantized trunk and differ only
+        # in a per-expert head, cutting parameters and per-sample compute
+        # roughly in half relative to fully replicated experts.
+        self.gate_threshold = getattr(cfg.experiment.router, "gate_threshold", 0.0)
+        if self.gate_threshold > 0:
+            print(f"  -> Uncertainty gating enabled: MC passes only when top-1 routing prob < {self.gate_threshold}")
+        self.shared_trunk = getattr(cfg.experiment.router, "shared_trunk", False)
+        if self.shared_trunk:
+            trunk_bits = getattr(cfg.experiment.router, "trunk_bits", 8)
+            print(f"  -> Shared-trunk MoE (trunk at {trunk_bits}-bit, {len(expert_quantizations)} heads).")
+            self.shared = SharedTrunkMoE(
+                in_dim, num_classes,
+                hidden_sizes=cfg.experiment.model.hidden_sizes,
+                dropout_prob=cfg.experiment.model.dropout_prob,
+                expert_bits=list(expert_quantizations),
+                trunk_bits=trunk_bits,
+            )
+            self.experts = nn.ModuleList()
+        else:
+            self.shared = None
+
         experts = []
-        for bit_width in expert_quantizations:
+        for bit_width in ([] if self.shared_trunk else expert_quantizations):
             if bit_width == "esc":
                 print("  -> Creating a ESC expert.")
                 experts.append(
@@ -146,8 +167,31 @@ class qMoEModelBatched(nn.Module):
                         num_bits=int(bit_width),
                     )
                 )
-        self.experts = nn.ModuleList(experts)
-        print(self.experts)
+        if not self.shared_trunk:
+            self.experts = nn.ModuleList(experts)
+            print(self.experts)
+
+        # Efficiency/accuracy option: warm-start each expert from the trained
+        # single model of the SAME bit-width, so the MoE begins at
+        # single-model accuracy and the router learns allocation on top of
+        # already-competent experts rather than training everything jointly
+        # from scratch. Paths are given per bit-width in the config as
+        # warm_start: {'4': '/path/best_model.pth', ...}.
+        warm = getattr(cfg.experiment.router, "warm_start", None)
+        if warm and not self.shared_trunk:
+            import os
+            for e_idx, bit_width in enumerate(expert_quantizations):
+                key = str(bit_width)
+                path = warm.get(key) if hasattr(warm, "get") else None
+                if not path or not os.path.exists(path):
+                    print(f"  -> warm start: no checkpoint for expert '{key}', training from scratch")
+                    continue
+                state = torch.load(path, map_location="cpu")
+                if isinstance(state, dict) and "state_dict" in state:
+                    state = state["state_dict"]
+                missing, unexpected = self.experts[e_idx].load_state_dict(state, strict=False)
+                print(f"  -> warm start: expert '{key}' <- {os.path.basename(path)} "
+                      f"({len(missing)} missing, {len(unexpected)} unexpected keys)")
 
         # ──────────────────────────────────────────────────────────────
         # Other attributes
@@ -173,9 +217,25 @@ class qMoEModelBatched(nn.Module):
 
         # Router
         if isinstance(self.router, BayesianRouter):
-            router_out, uncertainty = self.router(
-                x, compute_uncertainty=self.use_curiosity
-            )
+            # Efficiency option: the MC-dropout pass costs ~18% of inference,
+            # but it only changes the routing decision for samples the router
+            # is unsure about. With gating, one cheap deterministic pass runs
+            # first and the MC passes run ONLY on the ambiguous rows (those
+            # whose top-1 routing probability falls below `gate_threshold`).
+            if self.use_curiosity and getattr(self, "gate_threshold", 0.0) > 0.0:
+                base_logits = self.router.net(x)
+                base_p = F.softmax(base_logits, dim=1)
+                ambiguous = base_p.max(dim=1).values < self.gate_threshold
+                uncertainty = x.new_zeros(x.size(0))
+                if ambiguous.any():
+                    _, unc_sub = self.router(x[ambiguous], compute_uncertainty=True)
+                    uncertainty[ambiguous] = unc_sub
+                router_out = base_logits
+                self._last_gate_fraction = ambiguous.float().mean().item()
+            else:
+                router_out, uncertainty = self.router(
+                    x, compute_uncertainty=self.use_curiosity
+                )
         else:
             router_out, uncertainty = self.router(x), None
 
@@ -190,6 +250,21 @@ class qMoEModelBatched(nn.Module):
 
         # load-balancing L2 loss (auxiliary)
         lb_loss = torch.sum(router_p.mean(0) ** 2) if self.training else 0.0
+
+        # Shared-trunk dispatch: the expensive trunk runs ONCE for the whole
+        # batch, then only the small per-expert head runs on its assigned rows.
+        if self.shared_trunk:
+            z = self.shared.trunk_forward(x)
+            for e_idx in range(self.num_experts):
+                rows = (k_idx == e_idx).nonzero(as_tuple=True)[0]
+                if rows.numel() == 0:
+                    continue
+                cols = (k_idx[rows] == e_idx).nonzero(as_tuple=True)[1]
+                weights = k_val[rows, cols]
+                logits = self.shared.head_forward(z[rows], e_idx)
+                out[rows] += logits * weights.unsqueeze(1)
+            out = out / self.top_k
+            return out, router_p, lb_loss, uncertainty
 
         # Vectorised expert dispatch
         for e_idx, expert in enumerate(self.experts):

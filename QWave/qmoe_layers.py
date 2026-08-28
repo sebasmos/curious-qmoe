@@ -272,6 +272,58 @@ class BitLinear(nn.Module):
 #     def reset_parameters(self):
 #         nn.init.xavier_uniform_(self.weight)
 
+class SharedTrunkMoE(nn.Module):
+    """MoE whose experts share one quantized trunk and differ only in a
+    per-expert quantized head.
+
+    The standard heterogeneous MoE replicates the full 1.2M-parameter network
+    per expert, so N experts cost N x the parameters and N x the per-sample
+    compute of a single model. Here the expensive first layer (in_dim x h0,
+    which dominates the parameter count for 1536-dim embeddings) is computed
+    ONCE per sample at the trunk's precision, and only the small head differs
+    per expert. That makes the MoE's per-sample cost close to a single model's
+    while preserving heterogeneous precision at the decision layer.
+    """
+
+    def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob,
+                 expert_bits, trunk_bits=8, pre_ln=True, bias=True):
+        super().__init__()
+        h0 = hidden_sizes[0]
+        trunk_bits = trunk_bits if trunk_bits == "bitnet" else int(trunk_bits)
+        self.trunk = nn.Sequential(
+            BitLinear(in_dim, h0, num_bits=trunk_bits, bias=bias, pre_ln=pre_ln),
+            nn.LayerNorm(h0),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob),
+        )
+        heads = []
+        for bits in expert_bits:
+            # config carries bit-widths as strings ('4') or the literal
+            # 'bitnet'; BitLinear expects ints for the k-bit path.
+            bits = bits if bits == "bitnet" else int(bits)
+            layers, last = [], h0
+            for h in hidden_sizes[1:]:
+                layers += [
+                    BitLinear(last, h, num_bits=bits, bias=bias, pre_ln=pre_ln),
+                    nn.LayerNorm(h),
+                    nn.ReLU(),
+                    nn.Dropout(dropout_prob),
+                ]
+                last = h
+            layers.append(nn.Linear(last, num_classes, bias=True))
+            heads.append(nn.Sequential(*layers))
+        self.heads = nn.ModuleList(heads)
+
+    def trunk_forward(self, x):
+        return self.trunk(x)
+
+    def head_forward(self, z, expert_idx):
+        return self.heads[expert_idx](z)
+
+    def forward(self, x, expert_idx=0):
+        return self.heads[expert_idx](self.trunk(x))
+
+
 class BitNetExpert(nn.Module):
     def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob,
                  num_bits="bitnet", pre_ln=True, bias=True):
