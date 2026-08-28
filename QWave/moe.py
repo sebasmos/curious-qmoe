@@ -37,7 +37,7 @@ class qMoEModelBatched(nn.Module):
         # Curiosity parameters (for modifying routing probabilities)
         # ──────────────────────────────────────────────────────────────
         self.curiosity_alpha = getattr(cfg.experiment.router, "curiosity_alpha", 0.1)
-        self.curiosity_strategy = getattr(cfg.experiment.router, "curiosity_strategy", "entropy_regularization")
+        self.curiosity_strategy = getattr(cfg.experiment.router, "curiosity_strategy", "precision_prior")
 
         # Validate strategy
         valid_strategies = ["kl_divergence", "entropy_regularization", "precision_prior",

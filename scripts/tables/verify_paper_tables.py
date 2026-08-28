@@ -9,6 +9,12 @@ Data sources:
     - docs-temp/eccv-paper/results/ (Quinn/Urban8K MoE experiments)
     - outputs-rebuttal/outputs/ (ESC-50 MoE experiments)
     - RESULTS-paper/ (ESC-50 PTQ MoE + single models, same M2 Pro hardware)
+
+
+PROVENANCE: this script checks the ORIGINAL (arXiv v3-era) paper tables against
+the archived Apple M3 Max measurements. The corrected-router results that replace
+the MoE-C numbers in v4 live in the eq8fix/pprior tagged runs under outputs/ and
+are not covered here.
 """
 
 import json

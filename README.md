@@ -2,14 +2,14 @@
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/sebasmos/quantaudio)
 
-# Uncertainty Makes It Stable: Curiosity-Driven Quantized Mixture-of-Experts
+# Uncertainty-Aware Routing Makes Quantized Mixture-of-Experts Stable
 
 
 **curious-qmoe** is an uncertainty-aware quantized Mixture-of-Experts framework for efficient audio classification on resource-constrained edge devices. curious-qmoe matches full-precision accuracy at 4-bit with 4× compression, and its Bayesian uncertainty-based routing polarizes expert selection to stabilize cross-fold performance and inference cost.
 
 **Key Features:**
 - **Heterogeneous Quantization**: BitNet ternary, BitLinear (1-16 bit), post-training quantization (PTQ) with bitwise operations
-- **Curiosity-Driven Routing**: Bayesian router with Monte Carlo dropout for epistemic uncertainty estimation
+- **Uncertainty-Aware Routing**: a Bayesian router (Monte Carlo dropout) whose precision prior shifts uncertain samples toward higher-precision experts by construction
 - **Mixture-of-Experts**: Dynamic expert selection across quantized models for adaptive precision
 - **Hardware-Efficient**: Optimized for edge deployment with predictable latency (29 ms std)
 - **Comprehensive Evaluation**: Energy consumption, carbon emissions, and statistical significance testing
@@ -45,7 +45,7 @@ python benchmark.py \
   experiment.models_to_run=[esc]
 ```
 
-### MoE with Curiosity Mode
+### MoE with Uncertainty-Aware Routing (precision prior)
 
 ```bash
 python benchmark.py \
@@ -58,10 +58,12 @@ python benchmark.py \
   experiment.router.num_experts=3 \
   experiment.router.top_k=1 \
   experiment.router.use_curiosity=true \
-  experiment.metadata.tag=esc_moe_curiosity
+  experiment.router.curiosity_strategy=precision_prior \
+  experiment.router.curiosity_alpha=1.0 \
+  experiment.metadata.tag=esc_moe_uncertainty_aware
 ```
 
-**Curiosity outputs** (saved per fold):
+**Uncertainty outputs** (saved per fold):
 - `curiosity_values.json` - Raw uncertainty values
 - `curiosity_histogram.png` - Distribution of epistemic uncertainty
 - `curiosity_per_class.png` - Average uncertainty per class

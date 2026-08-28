@@ -50,8 +50,8 @@ experiment:
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
     diversity_loss_alpha: 1e-3  # New parameter for diversity loss
     use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for epistemic uncertainty estimation
-    curiosity_strategy: "entropy_regularization"  # Options: "kl_divergence", "entropy_regularization"
-    curiosity_alpha: 0.1  # Exploration strength hyperparameter (α in Equation 8)
+    curiosity_strategy: "precision_prior"  # the published method; ablations: "kl_divergence" (polarization-only), "entropy_regularization", "precision_sharp", "escalation", "soft_escalation"
+    curiosity_alpha: 1.0  # strength of the precision prior (α in Equation 8); the published setting
     mc_samples: 10  # Monte Carlo samples for uncertainty estimation
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
