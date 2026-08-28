@@ -59,4 +59,4 @@ __pycache__/
 #*.csv
 docs-temp/
 outputs-rebuttal/
-RESULTS-paper/
+RESULTS-paper/scripts/analysis/outputs-*/
