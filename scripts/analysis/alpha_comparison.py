@@ -42,17 +42,26 @@ def calculate_variance_reduction(
     baseline_std: float,
     current_std: float
 ) -> Dict[str, Any]:
-    """Calculate variance reduction percentage."""
+    """Calculate std and variance reduction percentages.
+
+    The paper's tables define variance reduction as 1 - sigma_c^2/sigma_b^2.
+    An earlier version of this script reported the std-based ratio under the
+    name "variance reduction", which mixed the two conventions; both are now
+    reported under their correct names.
+    """
     if baseline_std == 0:
         return {"error": "baseline std is zero"}
 
-    reduction_pct = ((baseline_std - current_std) / baseline_std) * 100
+    std_reduction_pct = ((baseline_std - current_std) / baseline_std) * 100
+    var_reduction_pct = (1 - (current_std ** 2) / (baseline_std ** 2)) * 100
 
     return {
         "baseline_std": baseline_std,
         "current_std": current_std,
-        "reduction_percent": reduction_pct,
-        "improved": reduction_pct > 0,
+        "std_reduction_percent": std_reduction_pct,
+        "variance_reduction_percent": var_reduction_pct,
+        "reduction_percent": var_reduction_pct,
+        "improved": var_reduction_pct > 0,
     }
 
 
