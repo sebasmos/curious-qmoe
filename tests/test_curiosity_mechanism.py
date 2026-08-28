@@ -172,13 +172,49 @@ def test_entropy_strategy_uses_uncertainty():
     print(f"✓ Entropy strategy consumes uncertainty (high-u move {high_move:.4f} > low-u move {low_move:.4f})")
 
 
+def test_precision_prior_routes_uncertain_to_high_precision():
+    """precision_prior must shift uncertain samples toward the highest-precision
+    expert BY CONSTRUCTION, while confident samples keep their base routing."""
+    torch.manual_seed(7)
+    cfg = create_test_config("precision_prior", alpha=1.0)
+    cfg.experiment.router.expert_quantizations = ['bitnet', '4', '8']
+    cfg.experiment.router.num_experts = 3
+    model = qMoEModelBatched(cfg, in_dim=1536, num_classes=50, num_experts=3, top_k=1)
+    model.eval()
+
+    # beta must order bitnet < 4 < 8
+    beta = model.precision_beta.tolist()
+    assert beta[0] < beta[1] < beta[2], f"precision ordering wrong: {beta}"
+    assert abs(beta[0]) < 1e-8 and abs(beta[2] - 1.0) < 1e-8
+
+    B = 400
+    logits = torch.randn(B, 3) * 1.5
+    base = F.softmax(logits, dim=1)
+    u = torch.linspace(0.0, 1.0, B)
+    out = model._apply_curiosity(logits, u)
+
+    # High-uncertainty rows gain mass on the highest-precision expert
+    hi_gain = (out[-100:, 2] - base[-100:, 2]).mean().item()
+    lo_gain = (out[:100, 2] - base[:100, 2]).mean().item()
+    assert hi_gain > 0, f"uncertain samples must gain Q8 mass (got {hi_gain})"
+    assert hi_gain > lo_gain, "Q8 gain must grow with uncertainty"
+    # Low-uncertainty rows stay near base routing
+    assert (out[:20] - base[:20]).abs().max().item() < 0.05, "confident samples should keep base routing"
+
+    # alpha=0 identity
+    model.curiosity_alpha = 0.0
+    z = model._apply_curiosity(logits, u)
+    assert (z - base).abs().max().item() < 1e-6, "alpha=0 must be identity for precision_prior"
+    print(f"✓ precision_prior routes uncertainty to high precision (Q8 gain {hi_gain:.4f} at high u, {lo_gain:.4f} at low u)")
+
+
 def test_all_strategies_preserve_normalization():
     """All strategies produce valid probability distributions."""
     torch.manual_seed(6)
     logits = torch.randn(64, 2) * 2
     uncertainty = torch.rand(64)
 
-    for strategy in ["kl_divergence", "entropy_regularization"]:
+    for strategy in ["kl_divergence", "entropy_regularization", "precision_prior"]:
         model = make_model(strategy)
         for alpha in [0.02, 0.2, 1.0, 5.0]:
             model.curiosity_alpha = alpha
@@ -210,6 +246,7 @@ if __name__ == "__main__":
     test_kl_sharpens_toward_one_hot()
     test_kl_matches_power_sharpening()
     test_entropy_strategy_uses_uncertainty()
+    test_precision_prior_routes_uncertain_to_high_precision()
     test_all_strategies_preserve_normalization()
     test_forward_pass_end_to_end()
     print("\n=== All Tests Passed! ===")

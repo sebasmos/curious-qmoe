@@ -40,13 +40,38 @@ class qMoEModelBatched(nn.Module):
         self.curiosity_strategy = getattr(cfg.experiment.router, "curiosity_strategy", "entropy_regularization")
 
         # Validate strategy
-        valid_strategies = ["kl_divergence", "entropy_regularization"]
+        valid_strategies = ["kl_divergence", "entropy_regularization", "precision_prior"]
         if self.use_curiosity and self.curiosity_strategy not in valid_strategies:
             raise ValueError(f"Invalid curiosity_strategy: {self.curiosity_strategy}. "
                              f"Must be one of {valid_strategies}")
 
         if self.use_curiosity:
             print(f"[MoE] Curiosity enabled: strategy='{self.curiosity_strategy}', α={self.curiosity_alpha}")
+
+        # Per-expert precision weights in [0, 1] for the precision_prior
+        # strategy: 0 for the lowest-precision expert, 1 for the highest.
+        # Uncertain samples get routed toward high beta (high precision) BY
+        # CONSTRUCTION, which is the behavior the paper claims for the
+        # uncertainty-aware router.
+        def _bits(q):
+            if q == "bitnet":
+                return 1.58
+            if q == "bitnet158b":
+                return 1.58
+            if q == "popcount":
+                return 1.0
+            if q == "qesc":
+                return 8.0
+            if q == "esc":
+                return 32.0
+            return float(q)
+        bit_values = [_bits(q) for q in cfg.experiment.router.expert_quantizations]
+        lo, hi = min(bit_values), max(bit_values)
+        if hi - lo < 1e-8:
+            beta = [0.0 for _ in bit_values]
+        else:
+            beta = [(b - lo) / (hi - lo) for b in bit_values]
+        self.register_buffer("precision_beta", torch.tensor(beta, dtype=torch.float32))
 
         # ──────────────────────────────────────────────────────────────
         # Expert initialization
@@ -249,6 +274,27 @@ class qMoEModelBatched(nn.Module):
 
             router_p = router_p_base * sharpening
             router_p = router_p / (router_p.sum(dim=1, keepdim=True) + 1e-8)
+
+            return router_p
+
+        # ============================================================
+        # Strategy 3: Precision Prior (uncertainty-directed routing)
+        # ============================================================
+        elif self.curiosity_strategy == "precision_prior":
+            # p_i^curious ∝ p_i · exp(α · u · β_i), where β_i in [0, 1] is
+            # expert i's normalized precision. High epistemic uncertainty
+            # shifts routing mass toward higher-precision experts by
+            # construction; confident samples keep the base routing, so easy
+            # inputs stay on the cheap low-bit experts.
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return router_p_base
+
+            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)  # (B, 1)
+            beta = self.precision_beta.unsqueeze(0)  # (1, E)
+
+            router_p = router_p_base * torch.exp(self.curiosity_alpha * u_norm * beta)
+            router_p = router_p / router_p.sum(dim=1, keepdim=True)
 
             return router_p
 
