@@ -40,7 +40,8 @@ class qMoEModelBatched(nn.Module):
         self.curiosity_strategy = getattr(cfg.experiment.router, "curiosity_strategy", "entropy_regularization")
 
         # Validate strategy
-        valid_strategies = ["kl_divergence", "entropy_regularization", "precision_prior"]
+        valid_strategies = ["kl_divergence", "entropy_regularization", "precision_prior",
+                            "precision_sharp", "escalation", "soft_escalation"]
         if self.use_curiosity and self.curiosity_strategy not in valid_strategies:
             raise ValueError(f"Invalid curiosity_strategy: {self.curiosity_strategy}. "
                              f"Must be one of {valid_strategies}")
@@ -297,6 +298,64 @@ class qMoEModelBatched(nn.Module):
             router_p = router_p / router_p.sum(dim=1, keepdim=True)
 
             return router_p
+
+        # ============================================================
+        # Strategy 4: Precision Sharp (polarization + precision prior)
+        # ============================================================
+        elif self.curiosity_strategy == "precision_sharp":
+            # p_i^curious ∝ p_i^(1+α) · exp(α · u · β_i): the kl strategy's
+            # temperature sharpening (stability) combined with the
+            # uncertainty-to-precision bias (specialization), one alpha.
+            sharpened = router_p_base.pow(1.0 + self.curiosity_alpha)
+            sharpened = sharpened / sharpened.sum(dim=1, keepdim=True)
+
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return sharpened
+            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)
+            beta = self.precision_beta.unsqueeze(0)
+
+            router_p = sharpened * torch.exp(self.curiosity_alpha * u_norm * beta)
+            router_p = router_p / router_p.sum(dim=1, keepdim=True)
+            return router_p
+
+        # ============================================================
+        # Strategy 5: Escalation (hard uncertainty guard)
+        # ============================================================
+        elif self.curiosity_strategy == "escalation":
+            # The top-alpha fraction of most-uncertain samples in the batch
+            # routes outright to the highest-precision expert; everything
+            # else keeps base routing. alpha in (0, 1) is the escalation
+            # quantile; alpha=0 escalates nothing (identity).
+            if self.curiosity_alpha <= 0:
+                return router_p_base
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return router_p_base
+            threshold = torch.quantile(uncertainty, 1.0 - min(self.curiosity_alpha, 1.0))
+            escalate = (uncertainty >= threshold).unsqueeze(1).float()  # (B, 1)
+
+            onehot = torch.zeros_like(router_p_base)
+            onehot[:, int(self.precision_beta.argmax())] = 1.0
+
+            return escalate * onehot + (1.0 - escalate) * router_p_base
+
+        # ============================================================
+        # Strategy 6: Soft Escalation (convex blend toward high precision)
+        # ============================================================
+        elif self.curiosity_strategy == "soft_escalation":
+            # p^curious = (1 - m) · p + m · onehot(highest precision), with
+            # m = clamp(alpha · u_norm, 0, 1): smooth version of escalation.
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return router_p_base
+            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)
+            mix = (self.curiosity_alpha * u_norm).clamp(0, 1)
+
+            onehot = torch.zeros_like(router_p_base)
+            onehot[:, int(self.precision_beta.argmax())] = 1.0
+
+            return (1.0 - mix) * router_p_base + mix * onehot
 
         else:
             # Unknown strategy, return base routing

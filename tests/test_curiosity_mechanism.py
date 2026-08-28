@@ -208,6 +208,36 @@ def test_precision_prior_routes_uncertain_to_high_precision():
     print(f"✓ precision_prior routes uncertainty to high precision (Q8 gain {hi_gain:.4f} at high u, {lo_gain:.4f} at low u)")
 
 
+def test_new_strategies_route_uncertain_to_high_precision():
+    """precision_sharp, escalation and soft_escalation must all shift the
+    most-uncertain samples toward the highest-precision expert, and be the
+    identity at alpha=0."""
+    torch.manual_seed(8)
+    B = 400
+    logits = torch.randn(B, 3) * 1.5
+    u = torch.linspace(0.0, 1.0, B)
+
+    for strategy in ["precision_sharp", "escalation", "soft_escalation"]:
+        cfg = create_test_config(strategy, alpha=0.3)
+        cfg.experiment.router.expert_quantizations = ['bitnet', '4', '8']
+        cfg.experiment.router.num_experts = 3
+        torch.manual_seed(8)
+        model = qMoEModelBatched(cfg, in_dim=1536, num_classes=50, num_experts=3, top_k=1)
+        model.eval()
+        base = F.softmax(logits, dim=1)
+
+        out = model._apply_curiosity(logits, u)
+        sums = out.sum(dim=1)
+        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5), f"{strategy}: not normalized"
+        hi_gain = (out[-50:, 2] - base[-50:, 2]).mean().item()
+        assert hi_gain > 0, f"{strategy}: most-uncertain rows must gain Q8 mass (got {hi_gain})"
+
+        model.curiosity_alpha = 0.0
+        z = model._apply_curiosity(logits, u)
+        assert (z - base).abs().max().item() < 1e-6, f"{strategy}: alpha=0 must be identity"
+        print(f"✓ {strategy}: uncertain rows gain Q8 mass ({hi_gain:.4f}), alpha=0 identity")
+
+
 def test_all_strategies_preserve_normalization():
     """All strategies produce valid probability distributions."""
     torch.manual_seed(6)
@@ -247,6 +277,7 @@ if __name__ == "__main__":
     test_kl_matches_power_sharpening()
     test_entropy_strategy_uses_uncertainty()
     test_precision_prior_routes_uncertain_to_high_precision()
+    test_new_strategies_route_uncertain_to_high_precision()
     test_all_strategies_preserve_normalization()
     test_forward_pass_end_to_end()
     print("\n=== All Tests Passed! ===")
