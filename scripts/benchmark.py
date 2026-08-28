@@ -114,7 +114,8 @@ def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
     if model_kind == "moe" or model_kind == "qmoe":
         # qmoe is initialized as MoE 
         device = get_device(cfg)
-        num_classes = len(np.unique(pd.read_csv(cfg.experiment.datasets.esc.csv)["class_id"].values)) 
+        _label_col = cfg.experiment.datasets.esc.get("label_col", "class_id")
+        num_classes = len(np.unique(pd.read_csv(cfg.experiment.datasets.esc.csv)[_label_col].values))
         return qMoEModelBatched(cfg, in_dim, 
             num_classes, 
             cfg.experiment.router.num_experts, 
@@ -171,6 +172,14 @@ def run_cv(csv_path: str, cfg: DictConfig):
     if df_full.empty:
         print(f"[ERROR] Input CSV {csv_path} is empty. Skipping dataset.")
         return {}
+
+    # label_col selects the supervision target. In the ESC-50 CSV, "class_id"
+    # holds the 5 super-categories (Animals, Natural, Human, Interior,
+    # Exterior) while "label" holds the true 50 ESC-50 classes. Historical
+    # paper runs trained on class_id, i.e. the 5-way task.
+    label_col = cfg.experiment.datasets.esc.get("label_col", "class_id")
+    if label_col != "class_id":
+        df_full["class_id"] = df_full[label_col]
 
     labels = df_full["class_id"].values
     df_feat = df_full.drop(columns=["folder","name","label","category"], errors="ignore")

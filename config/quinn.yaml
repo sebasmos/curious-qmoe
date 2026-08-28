@@ -14,15 +14,8 @@ experiment:
   track_emissions: false  # Set to true to enable carbon tracking (requires sudo on macOS)
   datasets:
     esc:
-      csv: /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv
-      # label_col: which CSV column supervises training.
-      #   class_id = 5 ESC-50 super-categories (what every historical run used)
-      #   label    = the true 50 ESC-50 classes
-      label_col: class_id
-      # csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
-      # csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      csv: /Users/cajas.sebastian/Documents/DATASETS/Quinn/efficientnet_ABGQI/ABGQI_embeddings_torch.csv
       # imgs (mel spectrograms) is not read by benchmark.py; kept for reference only
-      # imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
       normalization_type: "standard" # "l2" # or "standard", "min_max", "raw"
 
   model:
@@ -75,7 +68,7 @@ experiment:
     resume: true
 
   metadata:
-    tag: "EfficientNet_esc50_imgs_1536"
+    tag: "EfficientNet_quinn_ABGQI_1536"
     notes: ""
 
     
