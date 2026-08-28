@@ -89,7 +89,12 @@ def extract_routing(
             unc = out[3] if len(out) > 3 else None
 
             experts = probs.argmax(dim=1).cpu()
-            confs = probs.max(dim=1).values.cpu()
+            # Confidence must reflect sample difficulty, so it comes from the
+            # classifier's class distribution, NOT the router's distribution
+            # over experts (the previous version reported max router
+            # probability, which measures router decisiveness instead).
+            class_probs = torch.softmax(logits, dim=1)
+            confs = class_probs.max(dim=1).values.cpu()
             preds = logits.argmax(dim=1).cpu()
 
             for i, (exp, conf, pred) in enumerate(zip(experts, confs, preds)):
