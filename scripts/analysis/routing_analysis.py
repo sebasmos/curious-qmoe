@@ -176,7 +176,7 @@ def plot_confidence_by_expert(summaries: Dict[int, ExpertSummary], output: Path)
     print(f"Saved {output}")
 
 
-def build_moe(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02) -> qMoEModelBatched:
+def build_moe(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02, curiosity_strategy="kl_divergence") -> qMoEModelBatched:
     """Create MoE model with correct configuration matching latency_benchmark.py."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({
@@ -188,7 +188,7 @@ def build_moe(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosit
                 "top_k": 1,
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
-                "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
+                "curiosity_strategy": curiosity_strategy,
                 "curiosity_alpha": curiosity_alpha,  # Curiosity strength parameter
                 "mc_samples": mc_samples,
             },
@@ -224,7 +224,7 @@ def run_analysis(args):
         labels = torch.tensor(df["class_id"].values) if "class_id" in df else None
 
     # Model - use correct configuration matching latency_benchmark.py
-    model = build_moe(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha)
+    model = build_moe(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha, getattr(args, 'strategy', 'kl_divergence'))
     if args.checkpoint:
         model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
@@ -271,6 +271,8 @@ def main():
                         help="Output directory (default: outputs-{alpha}/rebuttal_routing)")
     parser.add_argument("--curiosity-alpha", type=float, default=0.02,
                         help="Curiosity strength alpha value")
+    parser.add_argument("--strategy", type=str, default="kl_divergence",
+                        help="Routing strategy applied during analysis")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--in-dim", type=int, default=1536)
     parser.add_argument("--num-classes", type=int, default=50)
