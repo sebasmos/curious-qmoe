@@ -116,7 +116,7 @@ class TestBuildMoe:
         assert len(out) == 4
         logits, router_p, lb_loss, curiosity = out
         assert logits.shape == (8, 10)
-        assert router_p.shape == (8, 4)
+        assert router_p.shape == (8, 3)  # build_moe uses 3 experts (bitnet, 4, 8)
 
     def test_build_moe_has_bayesian_router(self):
         model = build_moe(in_dim=64, num_classes=10, device="cpu")

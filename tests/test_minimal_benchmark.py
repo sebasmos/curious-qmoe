@@ -14,6 +14,15 @@ from QWave.memory import print_size_of_model
 from QWave.train_utils import train_pytorch_local
 from omegaconf import OmegaConf
 
+# This file is a script-style diagnostic that trains five model kinds at
+# module level; running it during pytest collection is unintended. Run it
+# directly instead: PYTHONPATH=. python tests/test_minimal_benchmark.py
+if __name__ != "__main__":
+    import pytest
+    pytest.skip("script-style diagnostic, run directly", allow_module_level=True)
+
+os.makedirs('/tmp/test_fold', exist_ok=True)
+
 # Minimal config
 cfg = OmegaConf.create({
     'experiment': {
@@ -92,8 +101,8 @@ for model_kind in model_kinds:
         class_weights,
         in_dim,
         device,
-        fold_dir='/tmp/test_fold',
-        resume=False,
+        '/tmp/test_fold',
+        resume_checkpoint=False,
         checkpoint_path='/tmp/test_checkpoint.pth'
     )
 

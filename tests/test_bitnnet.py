@@ -1,27 +1,48 @@
 import torch
-import pytest
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from QWave.bitnnet import BitLinear, MLPBitnet
+from QWave.bitnnet import BitLinear, BitNetExpert
+
+# Rewritten 2026-08-28 against the current API: the old version imported
+# MLPBitnet and called quantize_weights()/quantize_activations(), none of
+# which exist in QWave/bitnnet.py any more.
+
 
 def test_bitlinear_forward_shapes():
     in_features, out_features, batch_size = 10, 5, 4
-    layer = BitLinear(in_features, out_features)
-    x = torch.randn(batch_size, in_features)
-    y = layer(x)
-    assert y.shape == (batch_size, out_features), "Output shape mismatch"
+    for num_bits in (4, 8, 16, "bitnet"):
+        layer = BitLinear(in_features, out_features, num_bits=num_bits)
+        x = torch.randn(batch_size, in_features)
+        y = layer(x)
+        assert y.shape == (batch_size, out_features), f"Output shape mismatch for num_bits={num_bits}"
 
-def test_bitlinear_quantization_ranges():
-    in_features, out_features = 8, 3
-    layer = BitLinear(in_features, out_features)
-    wq = layer.quantize_weights()
-    # Should be close to ternary values
-    assert torch.all((wq.abs() < 1e-4) | (wq.abs() >= 1)), "Weights not ternary quantized"
-    x = torch.randn(2, in_features)
-    xq = layer.quantize_activations(x)
-    assert torch.all(xq <= 128) and torch.all(xq >= -128), "Activations out of 8-bit range"
 
-def test_mlpbitnet_forward():
-    input_size, output_size = 16, 4
-    model = MLPBitnet(input_size, output_size)
+def test_bitlinear_quantized_forward_differs_from_fp():
+    torch.manual_seed(0)
+    in_features, out_features = 32, 8
+    x = torch.randn(4, in_features)
+    fp = BitLinear(in_features, out_features, num_bits=16)
+    q4 = BitLinear(in_features, out_features, num_bits=4)
+    q4.weight.data.copy_(fp.weight.data)
+    if fp.bias is not None:
+        q4.bias.data.copy_(fp.bias.data)
+    assert not torch.allclose(fp(x), q4(x)), "4-bit forward should differ from 16-bit on identical weights"
+
+
+def test_bitnet_expert_forward():
+    in_dim, num_classes, batch_size = 16, 4, 3
+    for num_bits in (4, "bitnet"):
+        model = BitNetExpert(in_dim, num_classes, hidden_sizes=[8, 8], dropout_prob=0.1, num_bits=num_bits)
+        model.eval()
+        x = torch.randn(batch_size, in_dim)
+        y = model(x)
+        assert y.shape == (batch_size, num_classes), f"BitNetExpert output shape mismatch for num_bits={num_bits}"
+        assert torch.isfinite(y).all(), "BitNetExpert produced non-finite logits"
+
+
+if __name__ == "__main__":
+    test_bitlinear_forward_shapes()
+    test_bitlinear_quantized_forward_differs_from_fp()
+    test_bitnet_expert_forward()
+    print("All bitnnet tests passed")
