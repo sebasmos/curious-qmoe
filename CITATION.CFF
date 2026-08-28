@@ -1,23 +1,23 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "QWave: Learning to Route Curiously in Low-Bit Mixture-of-Experts"
+title: "curious-qmoe: Uncertainty-Aware Routing in Low-Bit Mixture-of-Experts"
 authors:
   - family-names: "Cajas-Ordóñez"
     given-names: "Sebastián Andrés"
   - family-names: "Torres"
     given-names: "Luis"
-  - family-names: "Meno"
-    given-names: "Mackenzie"
+  - family-names: "Meni"
+    given-names: "Mackenzie J."
   - family-names: "Lai"
     given-names: "Yuan"
   - family-names: "Durán"
     given-names: "Carlos"
   - family-names: "Celi"
     given-names: "Leo Anthony"
-url: "https://github.com/sebasmos/QWave"
-repository-code: "https://github.com/sebasmos/QWave"
-license: CC-BY-NC-SA-4.0
+url: "https://github.com/sebasmos/curious-qmoe"
+repository-code: "https://github.com/sebasmos/curious-qmoe"
+license: MIT
 date-released: "2025-01-06"
 version: "1.0.0"
 keywords:

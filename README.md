@@ -1,11 +1,11 @@
-[![arXiv](https://img.shields.io/badge/arXiv-2512.02646-b31b1b.svg)](https://arxiv.org/pdf/2511.11743)
-[![LICENSE](https://img.shields.io/badge/license-CC%20BY--NC--SA-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![arXiv](https://img.shields.io/badge/arXiv-2511.11743-b31b1b.svg)](https://arxiv.org/abs/2511.11743)
+[![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://github.com/sebasmos/quantaudio)
 
 # Uncertainty Makes It Stable: Curiosity-Driven Quantized Mixture-of-Experts
 
 
-**curious-qmoe** is a curiosity-driven quantized Mixture-of-Experts framework for efficient audio classification on resource-constrained edge devices. curious-qmoe achieves 99.9% of full-precision accuracy with 4× compression and 82% latency variance reduction through Bayesian epistemic uncertainty-based routing.
+**curious-qmoe** is an uncertainty-aware quantized Mixture-of-Experts framework for efficient audio classification on resource-constrained edge devices. curious-qmoe matches full-precision accuracy at 4-bit with 4× compression, and its Bayesian uncertainty-based routing polarizes expert selection to stabilize cross-fold performance and inference cost.
 
 **Key Features:**
 - **Heterogeneous Quantization**: BitNet ternary, BitLinear (1-16 bit), post-training quantization (PTQ) with bitwise operations
@@ -24,8 +24,8 @@
 ```bash
 conda create -n curious-qmoe python=3.11 -y
 conda activate curious-qmoe
-git clone https://github.com/sebasmos/QWave.git
-cd QWave
+git clone https://github.com/sebasmos/curious-qmoe.git
+cd curious-qmoe
 pip install -e .
 ```
 
@@ -289,7 +289,7 @@ Each experiment outputs `summary.json` with `f1_mean`, `f1_std`, per-fold result
 
 ## License
 
-This project is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
