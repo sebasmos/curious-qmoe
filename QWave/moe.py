@@ -199,19 +199,23 @@ class qMoEModelBatched(nn.Module):
         # Strategy 1: KL Divergence (Paper's Equation 8)
         # ============================================================
         if self.curiosity_strategy == "kl_divergence":
-            # p^curious_i ∝ pi · exp(α · KL(pi||p̄))
-            # Reference distribution (uniform)
+            # p_i^curious ∝ p_i · exp(α · KL(p_i||p̄))  (Eq. 8)
+            # BUG (fixed 2026-08-28): the previous code summed the KL term over
+            # experts into one (B, 1) scalar, so exp(alpha * kl_div) broadcast
+            # identically onto every expert. Scaling a distribution by the same
+            # constant and renormalizing returns it unchanged, an identity map;
+            # alpha had zero effect (verified: max |delta| ~1.8e-7 sweeping
+            # alpha in [0, 50]). Fixed to keep a PER-EXPERT bonus so the term
+            # actually reshapes the distribution instead of only rescaling it.
             p_uniform = torch.ones_like(router_p_base) / router_p_base.shape[1]
 
-            # KL divergence: KL(P||Q) = sum(P * log(P/Q))
-            # Higher KL = more confident/peaked distribution
-            kl_per_expert = router_p_base * (
-                (router_p_base + 1e-8).log() - (p_uniform + 1e-8).log()
-            )
-            kl_div = kl_per_expert.sum(dim=1, keepdim=True)  # (B, 1)
+            # Per-expert log-ratio term (not summed across experts): this is
+            # expert i's own contribution to KL(p||p_uniform), so it differs
+            # per expert and can push some experts up and others down.
+            log_ratio_per_expert = (router_p_base + 1e-8).log() - (p_uniform + 1e-8).log()  # (B, E)
 
-            # Apply curiosity bonus (exploration for confident routing)
-            curiosity_bonus = torch.exp(self.curiosity_alpha * kl_div)
+            # Apply curiosity bonus per expert (exploration for confident routing)
+            curiosity_bonus = torch.exp(self.curiosity_alpha * log_ratio_per_expert)  # (B, E)
             router_p = router_p_base * curiosity_bonus
             router_p = router_p / router_p.sum(dim=1, keepdim=True)
 
@@ -221,20 +225,27 @@ class qMoEModelBatched(nn.Module):
         # Strategy 2: Entropy Regularization
         # ============================================================
         elif self.curiosity_strategy == "entropy_regularization":
-            # Routing entropy: H(p) = -sum(p * log(p))
-            entropy = -(router_p_base * (router_p_base + 1e-8).log()).sum(dim=1, keepdim=True)
-
-            # Normalize uncertainty to [0, 1]
+            # BUG (fixed 2026-08-28): same identity-map defect as Strategy 1.
+            # `sharpening` was a (B, 1) scalar applied to every expert equally,
+            # so it always renormalized back to router_p_base. Fixed to scale
+            # each expert by its own deviation from uniform, so sharpening
+            # actually redistributes probability mass instead of only
+            # rescaling it uniformly.
             u_min, u_max = uncertainty.min(), uncertainty.max()
             if u_max - u_min < 1e-8:
                 return router_p_base
 
             u_norm = (uncertainty - u_min) / (u_max - u_min + 1e-8)
-            u_norm = u_norm.unsqueeze(1).clamp(0, 1)
+            u_norm = u_norm.unsqueeze(1).clamp(0, 1)  # (B, 1)
 
-            # Sharpening factor: high uncertainty + high entropy → sharpen distribution
-            # Intuition: uncertain samples with diffuse routing should commit more
-            sharpening = 1.0 + self.curiosity_alpha * u_norm * entropy
+            # Per-expert deviation from uniform routing (signed): experts
+            # already favored get pushed further up, disfavored ones further
+            # down, scaled by how uncertain the sample is.
+            p_uniform = torch.ones_like(router_p_base) / router_p_base.shape[1]
+            deviation_per_expert = router_p_base - p_uniform  # (B, E)
+
+            sharpening = 1.0 + self.curiosity_alpha * u_norm * deviation_per_expert  # (B, E)
+            sharpening = sharpening.clamp(min=1e-4)  # keep probabilities non-negative
 
             router_p = router_p_base * sharpening
             router_p = router_p / (router_p.sum(dim=1, keepdim=True) + 1e-8)
