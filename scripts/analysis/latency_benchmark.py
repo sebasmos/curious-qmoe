@@ -247,6 +247,17 @@ def run_benchmark(args):
     # Models
     q4 = build_q4_model(args.in_dim, args.num_classes, device)
     moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.alpha)
+    # Latency variance of the MoE depends on the trained routing distribution,
+    # so a randomly initialized router does not represent deployment behavior.
+    # Load trained weights when provided.
+    if getattr(args, "moe_checkpoint", None):
+        state = torch.load(args.moe_checkpoint, map_location=device)
+        moe.load_state_dict(state)
+        print(f"Loaded MoE checkpoint: {args.moe_checkpoint}")
+    if getattr(args, "q4_checkpoint", None):
+        state = torch.load(args.q4_checkpoint, map_location=device)
+        q4.load_state_dict(state)
+        print(f"Loaded Q4 checkpoint: {args.q4_checkpoint}")
     router = build_router(args.in_dim, 4, args.mc_samples, device)
 
     # Measure latency
@@ -297,6 +308,10 @@ def main():
     parser.add_argument("--num-classes", type=int, default=50)
     parser.add_argument("--mc-samples", type=int, default=10)
     parser.add_argument("--alpha", type=float, default=0.02, help="Curiosity alpha parameter")
+    parser.add_argument("--moe-checkpoint", type=str, default=None,
+                        help="Trained MoE state_dict; without it the router is random and latency variance is not representative")
+    parser.add_argument("--q4-checkpoint", type=str, default=None,
+                        help="Trained Q4-Base state_dict (weights do not affect latency, provided for completeness)")
 
     args = parser.parse_args()
 
