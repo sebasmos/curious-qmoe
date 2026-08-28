@@ -194,7 +194,7 @@ def build_q4_model(in_dim=1536, num_classes=50, device="cpu") -> BitNetExpert:
     return BitNetExpert(in_dim, num_classes, [640, 320], 0.2, num_bits=4).to(device)
 
 
-def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02) -> qMoEModelBatched:
+def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosity_alpha=0.02, curiosity_strategy="kl_divergence") -> qMoEModelBatched:
     """Create MoE model with Bayesian router and KL divergence curiosity."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({
@@ -206,7 +206,7 @@ def build_moe_model(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, cu
                 "top_k": 1,
                 "load_balancing_alpha": 1e-3,
                 "use_curiosity": True,
-                "curiosity_strategy": "kl_divergence",  # CRITICAL: Explicit KL divergence (Equation 8)
+                "curiosity_strategy": curiosity_strategy,
                 "curiosity_alpha": curiosity_alpha,  # Curiosity strength parameter
                 "mc_samples": mc_samples,
             },
@@ -246,7 +246,7 @@ def run_benchmark(args):
 
     # Models
     q4 = build_q4_model(args.in_dim, args.num_classes, device)
-    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.alpha)
+    moe = build_moe_model(args.in_dim, args.num_classes, device, args.mc_samples, args.alpha, getattr(args, 'strategy', 'kl_divergence'))
     # Latency variance of the MoE depends on the trained routing distribution,
     # so a randomly initialized router does not represent deployment behavior.
     # Load trained weights when provided.
@@ -308,6 +308,7 @@ def main():
     parser.add_argument("--num-classes", type=int, default=50)
     parser.add_argument("--mc-samples", type=int, default=10)
     parser.add_argument("--alpha", type=float, default=0.02, help="Curiosity alpha parameter")
+    parser.add_argument("--strategy", type=str, default="kl_divergence", help="Routing strategy for the MoE arm")
     parser.add_argument("--moe-checkpoint", type=str, default=None,
                         help="Trained MoE state_dict; without it the router is random and latency variance is not representative")
     parser.add_argument("--q4-checkpoint", type=str, default=None,
