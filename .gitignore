@@ -61,3 +61,4 @@ docs-temp/
 outputs-rebuttal/
 RESULTS-paper/
 scripts/analysis/outputs-*/
+qwave.egg-info/

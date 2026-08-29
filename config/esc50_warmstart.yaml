@@ -65,9 +65,9 @@ experiment:
     trunk_bits: 8         # trunk precision when shared_trunk is on
     gate_threshold: 0.0   # >0: run MC passes only when top-1 routing prob < this
     warm_start:
-      bitnet: "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/bitnet/fold_1/best_model.pth"
-      "4": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/4/fold_1/best_model.pth"
-      "8": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/8/fold_1/best_model.pth"
+      bitnet: "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/bitnet/fold_{fold}/best_model.pth"
+      "4": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/4/fold_{fold}/best_model.pth"
+      "8": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/8/fold_{fold}/best_model.pth"
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     
