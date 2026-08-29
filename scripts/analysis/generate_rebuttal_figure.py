@@ -70,7 +70,7 @@ def create_figure(confidence_by_expert, summaries, t_stat, p_value, output_path)
 
     # Prepare data for box plot
     expert_names = ['BitNet', 'Q4', 'Q8']
-    expert_quant = ['1-bit', '4-bit', '8-bit']
+    expert_quant = ['ternary', '4-bit', '8-bit']  # BitNet is 1.58-bit ternary, not 1-bit
     expert_ids = [0, 1, 2]
 
     # Collect confidence values and sample counts for each expert
