@@ -116,8 +116,16 @@ def create_figure(confidence_by_expert, summaries, t_stat, p_value, output_path)
             ax.hlines(mean_val, i + 0.6, i + 1.4, colors=color,
                      linestyles='dashed', linewidth=2.5, zorder=4)
 
-    # Add text box annotation (upper right) - corrected to 20%
-    textstr = 'Q8 confidence 20% lower\n(p<0.001, t-test)'
+    # Annotation reports the ACTUAL measured test, not a hardcoded claim: an
+    # earlier version pinned "p<0.001" into the figure regardless of the data.
+    if p_value is not None:
+        q8 = np.mean(confidence_by_expert.get(2, [np.nan]))
+        others = confidence_by_expert.get(0, []) + confidence_by_expert.get(1, [])
+        rel = (1 - q8 / np.mean(others)) * 100 if others else float("nan")
+        sig = f"p={p_value:.3f}" + (" (ns)" if p_value >= 0.05 else "")
+        textstr = f'Q8 confidence {rel:.0f}% lower\n({sig}, t-test)'
+    else:
+        textstr = 'confidence by expert'
     props = dict(boxstyle='round', facecolor='yellow', alpha=0.7, edgecolor='black', linewidth=1.5)
     ax.text(0.98, 0.97, textstr, transform=ax.transAxes, fontsize=13,
             verticalalignment='top', horizontalalignment='right', bbox=props, fontweight='bold')

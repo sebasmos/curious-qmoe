@@ -249,7 +249,9 @@ def run_analysis(args):
             "num_samples": len(routing),
             "checkpoint": args.checkpoint,
         },
-        "routing": [asdict(r) for r in routing[:100]],  # First 100 for brevity
+        # Full per-sample records: the confidence-distribution figure needs the
+        # whole distribution, not a 100-sample prefix, and the file stays small.
+        "routing": [asdict(r) for r in routing],
         "summaries": {str(k): asdict(v) for k, v in summaries.items()},
     }
     
