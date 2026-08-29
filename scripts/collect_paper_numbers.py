@@ -145,7 +145,12 @@ def main():
         print(f"  {label:24s} {fmt(folds(root, tag))}")
 
     # --- latency ----------------------------------------------------------
-    lat = root.parent / "scripts" / "analysis" / "outputs-paper" / "latency" / "latency_results.json"
+    # the artifact actually lands under the run-tagged analysis directory;
+    # keep the old path as a fallback so either layout is found
+    base = root.parent / "scripts" / "analysis"
+    lat = base / "outputs-pprior-a1.0" / "latency" / "latency_results.json"
+    if not lat.exists():
+        lat = base / "outputs-paper" / "latency" / "latency_results.json"
     if lat.exists():
         d = json.loads(lat.read_text())
         print("\n-- Section 5.4: latency --")
