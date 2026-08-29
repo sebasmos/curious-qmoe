@@ -16,7 +16,7 @@ Uncertain ones go to a higher-precision one. **Cross-fold variance drops by 68
 to 97%.**
 
 <p align="center">
-  <img src="docs/architecture.png" width="620" alt="Uncertainty-aware routing: a shared 8-bit trunk feeds a Bayesian router whose epistemic uncertainty reweights routing toward higher-precision experts.">
+  <img src="docs/architecture.png" width="420" alt="Uncertainty-aware routing: a shared 8-bit trunk feeds a Bayesian router whose epistemic uncertainty reweights routing toward higher-precision experts.">
 </p>
 
 ```python

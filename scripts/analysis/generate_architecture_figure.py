@@ -94,4 +94,19 @@ card(ax, 2.90, 2.45, 4.2, 0.9, "Aggregated Output", "#EFEFF1", fs=16.9,
 
 plt.savefig("scripts/analysis/outputs-paper/architecture.pdf", bbox_inches="tight")
 plt.savefig("/tmp/arch_review.png", dpi=140, bbox_inches="tight")
+# README copy: rendered straight from the vector figure at high DPI on an
+# opaque white ground, so it stays sharp on GitHub in either colour scheme.
+plt.savefig("docs/architecture.png", dpi=260, bbox_inches="tight",
+            facecolor="white", edgecolor="none")
+# matplotlib still writes an alpha channel, which GitHub renders as a
+# transparent (so dark-mode-grey) ground. Flatten it onto white.
+try:
+    from PIL import Image
+    _im = Image.open("docs/architecture.png")
+    if _im.mode == "RGBA":
+        _bg = Image.new("RGBA", _im.size, (255, 255, 255, 255))
+        _im = Image.alpha_composite(_bg, _im)
+    _im.convert("RGB").save("docs/architecture.png", optimize=True)
+except ImportError:
+    pass
 print("saved")
