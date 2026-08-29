@@ -1,77 +1,99 @@
 #!/usr/bin/env python3
-"""Architecture figure: shared-trunk MoE with uncertainty-directed precision prior.
+"""Architecture figure in the original diagram's visual language.
 
-Journal styling for Archives of Acoustics: serif (Times) fonts including math,
-vector PDF output. Shows the real mechanism: uncertainty feeds the precision
-prior, which reweights routing toward higher-precision heads (an earlier
-diagram drew uncertainty as a dead-end side output).
+Borderless pastel cards, soft yellow input, neutral chips, dashed rose
+uncertainty card, portrait flow. Content corrected relative to the original:
+three experts labeled with bit-width and beta, the shared trunk, and epistemic
+uncertainty feeding BACK into routing through the precision prior (the
+original drew it as a dead-end output).
 """
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Circle
+
+INK    = "#1F2937"
+SUBINK = "#6B7280"
+ROSE_T = "#8C3A34"
 
 plt.rcParams.update({
-    "font.family": "serif",
-    "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
-    "mathtext.fontset": "stix",
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
+    "mathtext.fontset": "dejavusans",
 })
 
-def box(ax, x, y, w, h, text, fc, fs=12.5, sub=None):
-    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.055",
-                                fc=fc, ec="0.15", lw=1.2))
-    cy = y + h/2 + (0.17 if sub else 0)
-    ax.text(x + w/2, cy, text, ha="center", va="center", fontsize=fs)
+def card(ax, x, y, w, h, text, fc, fs=13.5, sub=None, dashed=False, tc=INK, subc=SUBINK):
+    kw = dict(fc=fc, ec=ROSE_T if dashed else "none", lw=1.6)
+    if dashed: kw["ls"] = (0, (4, 3))
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.10", **kw))
+    cy = y + h/2 + (0.155 if sub else 0)
+    ax.text(x + w/2, cy, text, ha="center", va="center", fontsize=fs,
+            fontweight="bold", color=tc)
     if sub:
-        ax.text(x + w/2, y + h/2 - 0.22, sub, ha="center", va="center",
-                fontsize=9.5, style="italic", color="0.30")
+        ax.text(x + w/2, y + h/2 - 0.185, sub, ha="center", va="center",
+                fontsize=10, color=subc)
 
-def arrow(ax, p, q, color="0.15", lw=1.5, rad=0.0):
-    ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=14,
-                                 color=color, lw=lw,
-                                 connectionstyle=f"arc3,rad={rad}"))
+def wire(ax, p, q, rad=0.0, color=INK, lw=1.7, ls="-"):
+    ax.add_patch(FancyArrowPatch(p, q, arrowstyle="-|>", mutation_scale=15,
+                                 color=color, lw=lw, linestyle=ls,
+                                 connectionstyle=f"arc3,rad={rad}", zorder=1))
 
-fig, ax = plt.subplots(figsize=(8.6, 6.3))
-ax.set_xlim(0, 10); ax.set_ylim(1.05, 10.05); ax.axis("off")
+fig, ax = plt.subplots(figsize=(7.0, 8.6))
+ax.set_xlim(0, 10); ax.set_ylim(2.1, 13.55); ax.axis("off")
 
-box(ax, 3.0, 9.1, 4.0, 0.75, "Audio embedding $z$  (1536-d)", "#f4f4f4")
-box(ax, 2.2, 7.7, 5.6, 0.95, "Shared 8-bit trunk  $1536 \\times 640$", "#dbe9f9",
-    sub="computed once per sample")
-arrow(ax, (5.0, 9.08), (5.0, 8.73))
+# 1. input
+card(ax, 2.6, 12.35, 4.8, 0.95, "Audio Input", "#FEF4B5", sub="embeddings, 1536-d")
+wire(ax, (5.0, 12.30), (5.0, 11.80))
+ax.text(5.25, 12.02, "data flow", fontsize=9.5, color=SUBINK, ha="left")
 
-# router branch
-box(ax, 0.30, 5.65, 2.55, 0.95, "Bayesian router", "#fdeacf",
-    sub="$M$ MC-dropout passes")
-box(ax, 0.30, 3.8, 2.55, 1.0, "Precision prior", "#fbd9a6",
-    sub=r"$p_i^{\mathrm{UA}} \propto p_i\, e^{\,\alpha u \beta_i}$")
-arrow(ax, (3.0, 7.66), (1.85, 6.68), rad=-0.14)
-arrow(ax, (1.57, 5.60), (1.57, 4.88))
-ax.text(1.78, 5.24, "base $p_i$,  uncertainty $u$", fontsize=9.5,
-        style="italic", color="0.30", ha="left")
+# 2. shared trunk
+card(ax, 2.15, 10.85, 5.7, 0.95, "Shared 8-bit Trunk", "#EFEFF1",
+     sub="1536 × 640, computed once per sample")
+wire(ax, (5.0, 10.80), (5.0, 10.28))
 
-# heads
-heads = [(3.55, "#f0e5f8", "BitNet head", r"ternary,  $\beta_i = 0$"),
-         (5.75, "#e5d5f3", "Q4 head",     r"4-bit,  $\beta_i = 0.4$"),
-         (7.95, "#d8c2ef", "Q8 head",     r"8-bit,  $\beta_i = 1$")]
-for x, c, t, s_ in heads:
-    box(ax, x, 5.65, 1.95, 1.0, t, c, fs=11.5, sub=s_)
-    arrow(ax, (5.2, 7.66), (x + 0.975, 6.70))
-ax.text(6.72, 5.38, r"increasing precision $\beta_i \longrightarrow$",
-        fontsize=10, color="0.35", ha="center", style="italic")
+# 3. router circle + uncertainty card
+ax.add_patch(Circle((5.0, 9.45), 0.78, fc="#8FCB9B", ec="none", zorder=2))
+ax.text(5.0, 9.62, "Bayesian", ha="center", fontsize=11.5, fontweight="bold",
+        color="#123C27", zorder=3)
+ax.text(5.0, 9.28, "Router", ha="center", fontsize=11.5, fontweight="bold",
+        color="#123C27", zorder=3)
+ax.text(3.05, 9.62, "base routing $p_i$", fontsize=10, color=SUBINK, ha="right")
+ax.text(3.05, 9.30, "MC dropout", fontsize=10, color=SUBINK, ha="right")
 
-# top-k sum
-box(ax, 4.75, 3.05, 2.6, 0.8, "Top-$k$ weighted sum", "#dcefdc", fs=12)
-for x, _, _, _ in heads:
-    arrow(ax, (x + 0.975, 5.60), (6.05, 3.92))
+card(ax, 6.85, 8.95, 2.85, 1.05, "Epistemic", "#FBEBE9", fs=12,
+     sub="uncertainty  $u$", dashed=True, tc=ROSE_T, subc=ROSE_T)
+wire(ax, (5.82, 9.45), (6.80, 9.45), color=ROSE_T, lw=1.6)
 
-# the mechanism arrow, clear of all text
-arrow(ax, (2.88, 4.15), (4.70, 3.55), color="#a41e1e", lw=2.4, rad=-0.10)
-ax.text(2.55, 3.20, "uncertain samples routed to\nhigher-precision heads",
-        fontsize=10, color="#a41e1e", ha="center", style="italic")
+# 4. precision prior: uncertainty feeds BACK into routing
+wire(ax, (8.25, 8.88), (5.75, 7.55), rad=0.32, color=ROSE_T, lw=2.1)
+ax.text(7.83, 7.90, "precision prior", fontsize=10.5, color=ROSE_T,
+        ha="left", fontweight="bold")
+ax.text(7.83, 7.60, r"$p_i \cdot e^{\,\alpha u \beta_i}$", fontsize=11,
+        color=ROSE_T, ha="left")
 
-box(ax, 5.2, 1.55, 1.7, 0.75, "Class logits", "#f4f4f4", fs=12)
-arrow(ax, (6.05, 3.00), (6.05, 2.37))
+# 5. top-k chip
+wire(ax, (5.0, 8.62), (5.0, 7.90))
+card(ax, 3.9, 7.05, 2.2, 0.8, "Top-k", "#F6F6F8", fs=12.5)
+ax.text(3.62, 7.45, "routing", fontsize=9.5, color=SUBINK, ha="right")
+
+# 6. experts
+experts = [
+    (0.55, "#E0D4FF", "BitNet Expert", "ternary,  $\\beta=0$"),
+    (3.75, "#B8E3FA", "Q4 Expert", "4-bit,  $\\beta=0.4$"),
+    (6.95, "#FCC155", "Q8 Expert", "8-bit,  $\\beta=1$"),
+]
+for x, c, t, s_ in experts:
+    card(ax, x, 5.0, 2.5, 1.05, t, c, fs=12, sub=s_)
+    wire(ax, (5.0, 7.00), (x + 1.25, 6.12), rad=(0.16 if x < 3 else (-0.16 if x > 5 else 0.0)))
+ax.text(8.2, 4.62, "increasing precision  $\\beta_i \\rightarrow$", fontsize=10,
+        color=SUBINK, ha="center", style="italic")
+
+# 7. aggregate
+for x, _, _, _ in experts:
+    wire(ax, (x + 1.25, 4.95), (5.0, 3.35), rad=(-0.14 if x < 3 else (0.14 if x > 5 else 0.0)))
+card(ax, 3.25, 2.45, 3.5, 0.9, "Aggregated Output", "#EFEFF1", fs=12.5,
+     sub="class logits")
 
 plt.savefig("scripts/analysis/outputs-paper/architecture.pdf", bbox_inches="tight")
-plt.savefig("/tmp/arch_review.png", dpi=150, bbox_inches="tight")
+plt.savefig("/tmp/arch_review.png", dpi=140, bbox_inches="tight")
 print("saved")
