@@ -20,6 +20,10 @@ plt.rcParams.update({
     "font.family": "sans-serif",
     "font.sans-serif": ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
     "mathtext.fontset": "dejavusans",
+    # Write glyphs as outlines in SVG. The default stores <use> references
+    # into a font table, which renderers lacking the font (GitHub) collapse
+    # into solid blobs.
+    "svg.fonttype": "path",
 })
 
 def card(ax, x, y, w, h, text, fc, fs=18.2, sub=None, dashed=False, tc=INK, subc=SUBINK):
