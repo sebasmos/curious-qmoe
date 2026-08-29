@@ -38,7 +38,7 @@ for r in data["routing"]:
 total = sum(len(v) for v in conf.values())
 
 rng = np.random.default_rng(42)
-fig, ax = plt.subplots(figsize=(8.2, 5.2))
+fig, ax = plt.subplots(figsize=(8.6, 5.4))
 for e in (0, 1, 2):
     vals = np.array(conf.get(e, []))
     if not len(vals):
@@ -64,13 +64,13 @@ rel = (1 - q8.mean() / others.mean()) * 100
 sig = f"p = {pval:.3f}" + (", n.s." if pval >= 0.05 else "")
 ax.text(1.0, 1.045,
         f"Q8 mean {rel:.0f}% lower ({sig})",
-        transform=ax.transAxes, ha="right", va="bottom", fontsize=10.5, color=SUBINK,
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=14, color=SUBINK,
         bbox=dict(boxstyle="round,pad=0.45", fc="#F6F6F8", ec="none"), clip_on=False)
 
 ax.set_xticks([1, 2, 3])
 ax.set_xticklabels([f"{NAMES[e]}\n{QUANT[e]}  ·  {100*len(conf.get(e,[]))/total:.0f}% of samples"
-                    for e in (0, 1, 2)], fontsize=10.5, color=INK)
-ax.set_ylabel("Prediction confidence", fontsize=12, color=INK)
+                    for e in (0, 1, 2)], fontsize=14, color=INK)
+ax.set_ylabel("Prediction confidence", fontsize=15, color=INK)
 lo = min(min(v) for v in conf.values())
 ax.set_ylim(lo - 0.035, 1.045)
 ax.yaxis.grid(True, color="#E5E7EB", lw=0.8)
@@ -79,7 +79,7 @@ for side in ("top", "right"):
     ax.spines[side].set_visible(False)
 for side in ("left", "bottom"):
     ax.spines[side].set_color("#D1D5DB")
-ax.tick_params(colors=SUBINK)
+ax.tick_params(colors=SUBINK, labelsize=13)
 
 plt.tight_layout(rect=(0, 0, 1, 0.94))
 plt.savefig(args.output, bbox_inches="tight")

@@ -78,6 +78,14 @@ class qMoEModelBatched(nn.Module):
         # Expert initialization
         # ──────────────────────────────────────────────────────────────
         expert_quantizations = cfg.experiment.router.expert_quantizations
+        if len(expert_quantizations) != num_experts:
+            raise ValueError(
+                f"num_experts={num_experts} but expert_quantizations has "
+                f"{len(expert_quantizations)} entries ({list(expert_quantizations)}). "
+                "They must match: one quantization per expert. Set "
+                "experiment.router.expert_quantizations and "
+                "experiment.router.num_experts to the same length."
+            )
         print(f"Initializing experts with quantizations: {expert_quantizations}")
 
         # Efficiency option: experts share one quantized trunk and differ only
