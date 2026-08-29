@@ -44,7 +44,7 @@ ax.set_xlim(0, 10); ax.set_ylim(2.1, 13.55); ax.axis("off")
 # 1. input
 card(ax, 2.6, 12.35, 4.8, 0.95, "Audio Input", "#FEF4B5", sub="embeddings, 1536-d")
 wire(ax, (5.0, 12.30), (5.0, 11.80))
-ax.text(5.25, 12.02, "data flow", fontsize=9.5, color=SUBINK, ha="left")
+ax.text(5.32, 12.07, "data flow", fontsize=9.5, color=SUBINK, ha="left", va="center")
 
 # 2. shared trunk
 card(ax, 2.15, 10.85, 5.7, 0.95, "Shared 8-bit Trunk", "#EFEFF1",
@@ -65,11 +65,10 @@ card(ax, 6.85, 8.95, 2.85, 1.05, "Epistemic", "#FBEBE9", fs=12,
 wire(ax, (5.82, 9.45), (6.80, 9.45), color=ROSE_T, lw=1.6)
 
 # 4. precision prior: uncertainty feeds BACK into routing
-wire(ax, (8.25, 8.88), (5.75, 7.55), rad=0.32, color=ROSE_T, lw=2.1)
-ax.text(7.83, 7.90, "precision prior", fontsize=10.5, color=ROSE_T,
-        ha="left", fontweight="bold")
-ax.text(7.83, 7.60, r"$p_i \cdot e^{\,\alpha u \beta_i}$", fontsize=11,
-        color=ROSE_T, ha="left")
+wire(ax, (8.25, 8.88), (6.18, 7.45), rad=0.42, color=ROSE_T, lw=2.1)
+ax.text(8.55, 7.72, "precision prior\n" + r"$p_i \cdot e^{\,\alpha u \beta_i}$",
+        fontsize=10.5, color=ROSE_T, ha="center", va="center", fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="none"), zorder=4)
 
 # 5. top-k chip
 wire(ax, (5.0, 8.62), (5.0, 7.90))
@@ -85,8 +84,7 @@ experts = [
 for x, c, t, s_ in experts:
     card(ax, x, 5.0, 2.5, 1.05, t, c, fs=12, sub=s_)
     wire(ax, (5.0, 7.00), (x + 1.25, 6.12), rad=(0.16 if x < 3 else (-0.16 if x > 5 else 0.0)))
-ax.text(8.2, 4.62, "increasing precision  $\\beta_i \\rightarrow$", fontsize=10,
-        color=SUBINK, ha="center", style="italic")
+
 
 # 7. aggregate
 for x, _, _, _ in experts:

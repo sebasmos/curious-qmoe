@@ -62,17 +62,17 @@ q8 = np.array(conf.get(2, [])); others = np.array(conf.get(0, []) + conf.get(1, 
 t, pval = stats.ttest_ind(q8, others)
 rel = (1 - q8.mean() / others.mean()) * 100
 sig = f"p = {pval:.3f}" + (", n.s." if pval >= 0.05 else "")
-ax.text(0.985, 0.965,
+ax.text(1.0, 1.045,
         f"Q8 mean {rel:.0f}% lower ({sig})",
-        transform=ax.transAxes, ha="right", va="top", fontsize=10.5, color=SUBINK,
-        bbox=dict(boxstyle="round,pad=0.45", fc="#F6F6F8", ec="none"))
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=10.5, color=SUBINK,
+        bbox=dict(boxstyle="round,pad=0.45", fc="#F6F6F8", ec="none"), clip_on=False)
 
 ax.set_xticks([1, 2, 3])
 ax.set_xticklabels([f"{NAMES[e]}\n{QUANT[e]}  ·  {100*len(conf.get(e,[]))/total:.0f}% of samples"
                     for e in (0, 1, 2)], fontsize=10.5, color=INK)
 ax.set_ylabel("Prediction confidence", fontsize=12, color=INK)
 lo = min(min(v) for v in conf.values())
-ax.set_ylim(lo - 0.03, 1.03)
+ax.set_ylim(lo - 0.035, 1.045)
 ax.yaxis.grid(True, color="#E5E7EB", lw=0.8)
 ax.set_axisbelow(True)
 for side in ("top", "right"):
@@ -81,7 +81,7 @@ for side in ("left", "bottom"):
     ax.spines[side].set_color("#D1D5DB")
 ax.tick_params(colors=SUBINK)
 
-plt.tight_layout()
+plt.tight_layout(rect=(0, 0, 1, 0.94))
 plt.savefig(args.output, bbox_inches="tight")
 plt.savefig("/tmp/fig2_review.png", dpi=140, bbox_inches="tight")
 print("saved", args.output)
