@@ -183,6 +183,17 @@ class qMoEModelBatched(nn.Module):
             for e_idx, bit_width in enumerate(expert_quantizations):
                 key = str(bit_width)
                 path = warm.get(key) if hasattr(warm, "get") else None
+                # Per-fold warm start: {fold} is substituted with the current
+                # fold so each fold loads a checkpoint trained WITHOUT its own
+                # validation split. Using one fixed fold's checkpoint for every
+                # fold leaks validation data and inflates F1 (observed: fold 1
+                # 0.747 honest vs folds 2-5 at 0.91-0.95).
+                if path and "{fold}" in str(path):
+                    fold_id = getattr(cfg.experiment, "current_fold", None)
+                    if fold_id is None:
+                        print("  -> warm start: {fold} placeholder but no experiment.current_fold set; skipping")
+                        continue
+                    path = str(path).replace("{fold}", str(fold_id))
                 if not path or not os.path.exists(path):
                     print(f"  -> warm start: no checkpoint for expert '{key}', training from scratch")
                     continue

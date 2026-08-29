@@ -75,7 +75,7 @@ from pathlib import Path
 import os, sys, json, time, warnings
 
 import hydra
-from omegaconf import DictConfig, ListConfig
+from omegaconf import DictConfig, open_dict, ListConfig
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
@@ -249,6 +249,10 @@ def run_cv(csv_path: str, cfg: DictConfig):
             vl_ld = DataLoader(vl_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
             # model ──────────────────────────────────────────────────────
+            # expose the fold index so per-fold warm-start paths resolve to a
+            # checkpoint trained without this fold's validation split
+            with open_dict(cfg):
+                cfg.experiment.current_fold = fold
             model = build_model(str(model_kind), in_dim, num_classes, cfg).to(device)
             
             if len(tr_ld) > 0:
