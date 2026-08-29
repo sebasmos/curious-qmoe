@@ -16,7 +16,14 @@ Output:
 import argparse
 import json
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
+    "mathtext.fontset": "stix",
+})
 from scipy import stats
 
 
@@ -126,9 +133,9 @@ def create_figure(confidence_by_expert, summaries, t_stat, p_value, output_path)
         textstr = f'Q8 confidence {rel:.0f}% lower\n({sig}, t-test)'
     else:
         textstr = 'confidence by expert'
-    props = dict(boxstyle='round', facecolor='yellow', alpha=0.7, edgecolor='black', linewidth=1.5)
+    props = dict(boxstyle='round', facecolor='0.96', edgecolor='0.3', linewidth=1.0)
     ax.text(0.98, 0.97, textstr, transform=ax.transAxes, fontsize=13,
-            verticalalignment='top', horizontalalignment='right', bbox=props, fontweight='bold')
+            verticalalignment='top', horizontalalignment='right', bbox=props)
 
     # Set x-axis labels with expert name, quantization, and percentage
     x_labels = []
@@ -139,11 +146,11 @@ def create_figure(confidence_by_expert, summaries, t_stat, p_value, output_path)
         else:
             x_labels.append(f'{name}\n({quant})')
 
-    ax.set_xticklabels(x_labels, fontsize=12, fontweight='bold')
+    ax.set_xticklabels(x_labels, fontsize=12)
 
     # Labels (NO TITLE - moved to caption to save space)
-    ax.set_ylabel('Prediction Confidence', fontsize=14, fontweight='bold')
-    ax.set_xlabel('Expert (Quantization Level, % Samples)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Prediction Confidence', fontsize=13)
+    ax.set_xlabel('Expert (Quantization Level, % Samples)', fontsize=13)
 
     # Add grid (light dashed lines)
     ax.yaxis.grid(True, alpha=0.3, linestyle='--', color='gray')
