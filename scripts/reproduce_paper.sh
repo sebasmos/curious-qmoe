@@ -13,6 +13,10 @@
 # ============================================================================
 set -euo pipefail
 
+# Requires: the `curious-qmoe` conda env (torch, hydra, fvcore, codecarbon) and
+# PYTHONPATH set to the repository root, e.g.
+#   conda activate curious-qmoe && export PYTHONPATH=$(pwd)
+
 ESC=${1:-/Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv}
 QUINN=${2:-/Users/cajas.sebastian/Documents/DATASETS/Quinn/efficientnet_ABGQI/ABGQI_embeddings_torch.csv}
 URBAN=${3:-/Users/cajas.sebastian/Documents/DATASETS/Urban8k/efficientnet/urbansound8k.csv}
