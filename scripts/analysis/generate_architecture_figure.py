@@ -47,7 +47,7 @@ wire(ax, (5.0, 12.30), (5.0, 11.80))
 ax.text(5.32, 12.07, "data flow", fontsize=12.8, color=SUBINK, ha="left", va="center")
 
 # 2. shared trunk
-card(ax, 2.15, 10.85, 5.7, 0.95, "Shared 8-bit Trunk", "#EFEFF1",
+card(ax, 1.30, 10.85, 7.4, 0.95, "Shared 8-bit Trunk", "#EFEFF1",
      sub="1536 × 640, computed once per sample")
 wire(ax, (5.0, 10.80), (5.0, 10.28))
 
@@ -77,19 +77,19 @@ ax.text(3.62, 7.45, "routing", fontsize=12.8, color=SUBINK, ha="right")
 
 # 6. experts
 experts = [
-    (0.35, "#E0D4FF", "BitNet Expert", "ternary,  $\\beta=0$"),
-    (3.65, "#B8E3FA", "Q4 Expert", "4-bit,  $\\beta=0.4$"),
-    (6.95, "#FCC155", "Q8 Expert", "8-bit,  $\\beta=1$"),
+    (0.20, "#E0D4FF", "BitNet Expert", "ternary,  $\\beta=0$"),
+    (3.55, "#B8E3FA", "Q4 Expert", "4-bit,  $\\beta=0.4$"),
+    (6.90, "#FCC155", "Q8 Expert", "8-bit,  $\\beta=1$"),
 ]
 for x, c, t, s_ in experts:
-    card(ax, x, 5.0, 2.7, 1.05, t, c, fs=16.2, sub=s_)
-    wire(ax, (5.0, 7.00), (x + 1.25, 6.12), rad=(0.16 if x < 3 else (-0.16 if x > 5 else 0.0)))
+    card(ax, x, 5.0, 2.9, 1.05, t, c, fs=16.2, sub=s_)
+    wire(ax, (5.0, 7.00), (x + 1.45, 6.12), rad=(0.16 if x < 3 else (-0.16 if x > 5 else 0.0)))
 
 
 # 7. aggregate
 for x, _, _, _ in experts:
-    wire(ax, (x + 1.25, 4.95), (5.0, 3.35), rad=(-0.14 if x < 3 else (0.14 if x > 5 else 0.0)))
-card(ax, 3.25, 2.45, 3.5, 0.9, "Aggregated Output", "#EFEFF1", fs=16.9,
+    wire(ax, (x + 1.45, 4.95), (5.0, 3.35), rad=(-0.14 if x < 3 else (0.14 if x > 5 else 0.0)))
+card(ax, 2.90, 2.45, 4.2, 0.9, "Aggregated Output", "#EFEFF1", fs=16.9,
      sub="class logits")
 
 plt.savefig("scripts/analysis/outputs-paper/architecture.pdf", bbox_inches="tight")
