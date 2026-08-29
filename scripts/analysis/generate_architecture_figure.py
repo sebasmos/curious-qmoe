@@ -96,7 +96,12 @@ plt.savefig("scripts/analysis/outputs-paper/architecture.pdf", bbox_inches="tigh
 plt.savefig("/tmp/arch_review.png", dpi=140, bbox_inches="tight")
 # README copy: rendered straight from the vector figure at high DPI on an
 # opaque white ground, so it stays sharp on GitHub in either colour scheme.
-plt.savefig("docs/architecture.png", dpi=260, bbox_inches="tight",
+# README copy as SVG: GitHub renders it as vector, so it stays sharp at any
+# zoom and on any display, unlike a rasterised PNG.
+plt.savefig("docs/architecture.svg", format="svg", bbox_inches="tight",
+            facecolor="white", edgecolor="none")
+# PNG fallback at high DPI for contexts that cannot render SVG.
+plt.savefig("docs/architecture.png", dpi=400, bbox_inches="tight",
             facecolor="white", edgecolor="none")
 # matplotlib still writes an alpha channel, which GitHub renders as a
 # transparent (so dark-mode-grey) ground. Flatten it onto white.
