@@ -480,24 +480,20 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
     # val_loader drives early stopping and checkpoint selection, so it must
     # never be the fold that is reported (benchmark.py passes an inner
     # validation split carved out of the training folds).
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # Same recipe as the single models (experiment.train): optimizer, loss,
+    # LR schedule, early stopping and gradient clipping.
+    from .train_utils import build_training_recipe
+    rc = cfg.experiment.train
+    optimizer, criterion, scheduler = build_training_recipe(rc, model, class_weights)
 
-    best_accuracy = 0.0
+    best_accuracy = -1.0
     patience_counter = 0
     best_state = None
-
-    early_stopping_config = cfg.experiment.router.get("early_stopping")
-    early_stopping_enabled = early_stopping_config is not None
-
-    if early_stopping_enabled:
-        patience = early_stopping_config.patience
-        delta = early_stopping_config.delta
-        print(f"Early stopping enabled with patience={patience} and delta={delta}")
+    patience, delta = rc.patience, rc.min_delta
 
     train_losses, val_losses = [], []
 
-    for epoch in range(cfg.experiment.model.epochs):
+    for epoch in range(rc.max_epochs):
         model.train()
         total_loss = 0
         for embeddings, labels in train_loader:
@@ -519,6 +515,7 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), rc.grad_clip_norm)
             optimizer.step()
             total_loss += loss.item()
 
@@ -549,33 +546,30 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
         f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
 
         print(
-            f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, "
+            f"Epoch {epoch+1}/{rc.max_epochs}, "
             f"Train Loss: {total_loss:.4f}, Val Accuracy: {accuracy:.4f}, Val F1: {f1:.4f}"
         )
 
         val_losses.append(f1)
+        scheduler.step(f1)
 
-        if f1 > best_accuracy + (delta if early_stopping_enabled else 0):
+        if f1 > best_accuracy + delta:
             best_accuracy = f1
             print(f"  -> Validation f1 improved to {best_accuracy:.4f}. Saving model.")
             torch.save(model.state_dict(), ckpt_path)
-            best_state = (model.state_dict(), train_losses, val_losses, best_accuracy, all_labels, all_preds, [])
-            if early_stopping_enabled:
-                patience_counter = 0
+            best_weights = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            best_state = (best_weights, train_losses, val_losses, best_accuracy, all_labels, all_preds, [])
+            patience_counter = 0
         else:
-            if early_stopping_enabled:
-                patience_counter += 1
-                print(f"  -> No improvement for {patience_counter} epoch(s). Patience is {patience}.")
+            patience_counter += 1
+            print(f"  -> No improvement for {patience_counter} epoch(s). Patience is {patience}.")
 
-        if early_stopping_enabled and patience_counter >= patience:
-            print(f"\nEARLY STOPPING: Validation accuracy has not improved by >{delta} for {patience} epochs.")
+        if patience_counter >= patience:
+            print(f"\nEARLY STOPPING: Validation F1 has not improved by >{delta} for {patience} epochs.")
             break
 
-    if best_state is None:
-        print("No improvement observed; saving final model state.")
-        torch.save(model.state_dict(), ckpt_path)
-        best_state = (model.state_dict(), train_losses, val_losses, accuracy, all_labels, all_preds, [])
-
+    # leave the model at the selected checkpoint, as train_pytorch_local does
+    model.load_state_dict(best_state[0])
     return best_state
 
 def _validate_moe_epoch(model, val_loader, criterion, device, fold_dir: str = "outputs"):

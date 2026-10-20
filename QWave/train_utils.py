@@ -49,6 +49,18 @@ def _validate_single_epoch(model, val_loader, criterion, device, average="macro"
     return epoch_val_loss, f1, all_labels, all_preds, all_probs
 
 
+def build_training_recipe(rc, model, class_weights):
+    """Optimizer, loss and LR scheduler of the shared recipe (experiment.train),
+    used by single models and MoE alike so the arms differ only in the model."""
+    if rc.optimizer != "adamw":
+        raise ValueError(f"unsupported optimizer '{rc.optimizer}'")
+    optimizer = torch.optim.AdamW(model.parameters(), lr=rc.lr, weight_decay=rc.weight_decay)
+    criterion = nn.CrossEntropyLoss(weight=class_weights if rc.class_weighted_loss else None,
+                                    label_smoothing=rc.label_smoothing)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=rc.lr_factor, patience=rc.lr_patience)  # max: F1
+    return optimizer, criterion, scheduler
+
+
 def train_pytorch_local(args, model, train_loader, val_loader, class_weights, num_columns, device, fold_folder,
                         resume_checkpoint=False, checkpoint_path=None):
     # val_loader drives early stopping, the LR scheduler and checkpoint
@@ -59,10 +71,9 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
     patience_counter = 0
     model = model.to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.model.learning_rate, weight_decay=args.model.weight_decay)
-    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=args.model.label_smoothing)
-    scheduler = ReduceLROnPlateau(optimizer, mode='max', patience=args.model.patience, factor=args.model.factor) # mode='max' for F1
-    
+    rc = args.train
+    optimizer, criterion, scheduler = build_training_recipe(rc, model, class_weights)
+
     train_losses, val_losses = [], []
     # These will store the labels/preds/probs from the epoch that achieved the best_f1
     all_labels_best_epoch, all_preds_best_epoch, all_probs_best_epoch = [], [], []
@@ -72,7 +83,7 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         model = model.to(device)
 
-    for epoch in range(args.model.epochs):
+    for epoch in range(rc.max_epochs):
         model.train()
         epoch_train_loss = 0
         for inputs, labels in train_loader:
@@ -81,6 +92,7 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), rc.grad_clip_norm)
             optimizer.step()
             epoch_train_loss += loss.item() * inputs.size(0)
 
@@ -92,11 +104,11 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
             _validate_single_epoch(model, val_loader, criterion, device)
         val_losses.append(epoch_val_loss)
 
-        print(f"Epoch {epoch+1}/{args.model.epochs}, Val F1 Score: {f1:.4f}, Val Loss: {epoch_val_loss:.4f}")
+        print(f"Epoch {epoch+1}/{rc.max_epochs}, Val F1 Score: {f1:.4f}, Val Loss: {epoch_val_loss:.4f}")
         scheduler.step(f1) # Schedule based on F1
 
         # Check for best model and save its state and corresponding metrics
-        if f1 > best_f1:
+        if f1 > best_f1 + rc.min_delta:
             best_f1 = f1
             patience_counter = 0
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -110,10 +122,10 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
             all_probs_best_epoch = current_probs
         else:
             patience_counter += 1
-            if patience_counter >= args.model.patience:
+            if patience_counter >= rc.patience:
                 print("Early stopping triggered")
                 break
-    
+
     # Plotting using the overall training history and the metrics from the best epoch
     plot_training_curves(train_losses, val_losses, fold_folder)
     # Only plot confusion matrix if there was at least one valid validation step

@@ -48,7 +48,7 @@ def tiny_cfg(csv, tag, models, seed=0):
     e.cross_validation.n_splits = N_FOLDS
     e.cross_validation.fold_column = "folder"
     e.model.hidden_sizes = [8, 8]
-    e.model.epochs = 3
+    e.train.max_epochs = 3
     e.router.expert_quantizations = ["bitnet", "4", "8"]
     e.router.num_experts = 3
     e.router.top_k = 1
@@ -119,7 +119,7 @@ def test_train_pytorch_local_returns_selected_epoch(tmp_path, monkeypatch):
 
     monkeypatch.setattr(train_utils, "_validate_single_epoch", fake_validate)
     args = tiny_cfg(tmp_path / "x.csv", tmp_path / "x", ["4"]).experiment
-    args.model.epochs = 5
+    args.train.max_epochs = 5
     returned, *_ = train_utils.train_pytorch_local(args, model, loader, loader, torch.ones(2), 4,
                                                    "cpu", str(tmp_path))
     for k, v in returned.state_dict().items():
@@ -132,6 +132,7 @@ def test_train_pytorch_local_returns_selected_epoch(tmp_path, monkeypatch):
 class _Recorder:
     def __init__(self):
         self.datasets, self.train_calls, self.evaluated = [], [], []
+        self.clips, self.trainer = [], None
 
 
 @pytest.fixture(scope="module")
@@ -153,8 +154,15 @@ def runs(tmp_path_factory):
     def wrap_trainer(fn, tr_pos, val_pos):
         def wrapped(*args):
             rec.train_calls.append((args[tr_pos].dataset.row_ids, args[val_pos].dataset.row_ids))
+            rec.trainer = fn.__name__
             return fn(*args)
         return wrapped
+
+    real_clip = torch.nn.utils.clip_grad_norm_
+
+    def counting_clip(params, max_norm, *a, **k):
+        rec.clips.append((rec.trainer, max_norm))
+        return real_clip(params, max_norm, *a, **k)
 
     def wrap_eval(fn):
         def wrapped(model, loader, *args):
@@ -168,6 +176,7 @@ def runs(tmp_path_factory):
     mp.setattr(bench, "train_moe_local", wrap_trainer(bench.train_moe_local, 3, 4))
     mp.setattr(bench, "_validate_single_epoch", wrap_eval(bench._validate_single_epoch))
     mp.setattr(bench, "_validate_moe_epoch", wrap_eval(bench._validate_moe_epoch))
+    mp.setattr(torch.nn.utils, "clip_grad_norm_", counting_clip)
 
     out = {}
     for name, seed in (("a", 0), ("b", 0), ("c", 1)):
@@ -242,3 +251,22 @@ def test_summary_carries_per_fold_pairing_keys(runs):
     assert s["fold_scheme"] == {"type": "predefined", "column": "folder"}
     assert [f["fold"] for f in s["folds"]] == [1, 2, 3]
     assert all({"seed", "f1_macro", "f1_weighted", "accuracy"} <= set(f) for f in s["folds"])
+
+
+def test_one_training_recipe_for_singles_and_moe(runs):
+    _, rec, out = runs
+    single = json.loads((out["a"][0] / "4" / "summary.json").read_text())
+    moe = json.loads((out["a"][0] / "moe" / "summary.json").read_text())
+    assert single["train_recipe"] == moe["train_recipe"]
+    assert single["train_recipe"]["grad_clip_norm"] == 1.0
+    clipped = {name for name, norm in rec.clips if norm == 1.0}
+    assert clipped == {"train_pytorch_local", "train_moe_local"}
+
+
+def test_recipe_builds_adamw_with_label_smoothing():
+    rc = OmegaConf.load(ROOT / "config" / "esc50.yaml").experiment.train
+    opt, crit, sched = train_utils.build_training_recipe(rc, torch.nn.Linear(3, 2), torch.ones(2))
+    assert isinstance(opt, torch.optim.AdamW)
+    assert opt.defaults["lr"] == rc.lr and opt.defaults["weight_decay"] == rc.weight_decay
+    assert crit.label_smoothing == rc.label_smoothing and crit.weight is not None
+    assert sched.patience == rc.lr_patience < rc.patience

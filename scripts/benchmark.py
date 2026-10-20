@@ -284,9 +284,9 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 print(f"[WARN] Fold {fold} has an empty train, inner validation or test set. Skipping this fold.")
                 continue
 
-            tr_ld = DataLoader(tr_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True, generator=loader_gen)
-            iv_ld = DataLoader(iv_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
-            te_ld = DataLoader(te_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
+            tr_ld = DataLoader(tr_ds, batch_size=cfg.experiment.train.batch_size, shuffle=True, generator=loader_gen)
+            iv_ld = DataLoader(iv_ds, batch_size=cfg.experiment.train.batch_size, shuffle=False)
+            te_ld = DataLoader(te_ds, batch_size=cfg.experiment.train.batch_size, shuffle=False)
 
             # model ──────────────────────────────────────────────────────
             # expose the fold index so per-fold warm-start paths resolve to a
@@ -297,11 +297,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
 
             # FLOPs are traced on fixed rows rather than a loader batch, so
             # counting does not draw from the training loader's generator
-            bs = cfg.experiment.model.batch_size
+            bs = cfg.experiment.train.batch_size
             if len(tr_ld) > 0:
                 sample_input_train = tr_ds.features[:bs].to(device)
                 flops_train_analyzer = FlopCountAnalysis(model, sample_input_train)
-                training_flops = flops_train_analyzer.total() * cfg.experiment.model.epochs * len(tr_ld)
+                training_flops = flops_train_analyzer.total() * cfg.experiment.train.max_epochs * len(tr_ld)
                 all_training_flops.append(training_flops)
             else:
                 all_training_flops.append(0)
@@ -513,6 +513,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "inner_val_ratio": inner_val_ratio,
             "primary_metric": "f1_macro",
             "num_threads": torch.get_num_threads(),
+            "train_recipe": OmegaConf.to_container(cfg.experiment.train, resolve=True),
             "f1_macro_mean": float(np.mean(all_final_f1_scores)),
             "f1_macro_std": float(np.std(all_final_f1_scores)),
             "f1_weighted_mean": float(np.mean(all_final_f1_weighted)),

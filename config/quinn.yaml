@@ -21,32 +21,32 @@ experiment:
       normalization_type: "standard" # "l2" # or "standard", "min_max", "raw"
 
   model:
-    batch_size: 64
     hidden_sizes: [640, 320]
-    learning_rate: 0.0005793146438537801
     dropout_prob:  0.1953403862875243
-    epochs: 100
-    early_stopping:
-      patience: 19  
-      delta: 0.01
+
+  # One training recipe for every model, singles and MoE alike (the values are
+  # the tuned single-model recipe). Early stopping, the LR scheduler and
+  # checkpoint selection all watch macro F1 on the inner validation split.
+  train:
+    optimizer: adamw
+    lr: 0.0005793146438537801
     weight_decay: 0.0051275736171219844
     label_smoothing: 0.10851194368924916
-    patience: 15
-    factor: 0.6156433661410728
-  
+    class_weighted_loss: true  # inverse class frequency weights in the cross-entropy
+    batch_size: 64
+    max_epochs: 100
+    patience: 15  # early stopping: epochs without inner-validation improvement
+    min_delta: 0.0
+    lr_factor: 0.6156433661410728  # ReduceLROnPlateau on inner-validation macro F1
+    lr_patience: 5
+    grad_clip_norm: 1.0
+
   router:
     expert_quantizations: [1, 2, 4, 16]
-    early_stopping:
-      patience: 30
-      delta: 0.001
     num_experts: 4
     top_k: 1
     hidden_dim: 128
     dropout_prob: 0.2
-    epochs: 150
-    lr_moe_train: 1e-3
-    batch_size: 256
-    weight_decay: 1e-4
     load_balancing: true
     load_balancing_alpha: 1e-3
     diversity_loss_enabled: false  # Default to False, can be enabled in the config
