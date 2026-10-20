@@ -270,3 +270,14 @@ def test_recipe_builds_adamw_with_label_smoothing():
     assert opt.defaults["lr"] == rc.lr and opt.defaults["weight_decay"] == rc.weight_decay
     assert crit.label_smoothing == rc.label_smoothing and crit.weight is not None
     assert sched.patience == rc.lr_patience < rc.patience
+
+
+def test_moe_summary_has_held_out_routing_and_alpha0_ablation(runs):
+    _, _, out = runs
+    s = json.loads((out["a"][0] / "moe" / "summary.json").read_text())
+    for f in s["folds"]:
+        assert f["routing"]["matches_scored_pass"], "routing pass must reproduce the scored test pass"
+        assert len(f["routing"]["overall"]) == 3 and len(f["routing"]["by_uncertainty_quartile"]) == 4
+        a0 = f["alpha0_eval"]
+        assert 0.0 <= a0["expert_changed_fraction"] <= 1.0 and "f1_macro" in a0
+    assert "alpha0_eval" in s and len(s["routing_overall_mean"]) == 3

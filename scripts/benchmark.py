@@ -86,7 +86,6 @@ from torch.utils.data import DataLoader
 from fvcore.nn import FlopCountAnalysis
 from memory_profiler import memory_usage
 from codecarbon import EmissionsTracker
-import platform
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 
@@ -160,6 +159,49 @@ PROTOCOL_VERSION = 2
 def checkpoint_name(model_kind: str) -> str:
     """train_moe_local writes best.pth, train_pytorch_local best_model.pth."""
     return "best.pth" if model_kind in ("moe", "qmoe") else "best_model.pth"
+
+def prepare_eval_model(model_kind: str, model, cfg):
+    """The network scored on the test fold. The PTQ single model ("qesc") and
+    every PTQ expert ("qesc") inside an MoE are dynamically int8-quantized
+    after training; everything else is evaluated as trained."""
+    model.eval()
+    if model_kind == "qesc":
+        return ptq_dynamic_int8(model)
+    if model_kind in ("moe", "qmoe") and model.shared is None:
+        for i, q in enumerate(cfg.experiment.router.expert_quantizations):
+            if str(q) == "qesc":
+                model.experts[i] = ptq_dynamic_int8(model.experts[i])
+    return model
+
+def route_test_fold(model, loader, device, seed):
+    """Top-1 expert, epistemic uncertainty (None for a deterministic router)
+    and prediction for every sample in loader, with MC dropout seeded."""
+    torch.manual_seed(seed)
+    model.eval()
+    experts, unc, preds = [], [], []
+    with torch.no_grad():
+        for X, _ in loader:
+            out, router_p, _, u = model(X.to(device))
+            experts.append(router_p.argmax(dim=1).cpu())
+            preds.append(out.argmax(dim=1).cpu())
+            if u is not None:
+                unc.append(u.cpu())
+    return (torch.cat(experts).numpy(), torch.cat(unc).numpy() if unc else None,
+            torch.cat(preds).numpy())
+
+def routing_fractions(experts, uncertainty, n_experts):
+    """Share of samples sent to each expert, overall and per quartile of the
+    router's uncertainty (quartile 1 = most confident)."""
+    block = {"overall": (np.bincount(experts, minlength=n_experts) / len(experts)).tolist()}
+    if uncertainty is not None:
+        edges = np.quantile(uncertainty, [0.25, 0.5, 0.75])
+        quart = np.searchsorted(edges, uncertainty, side="right")
+        block["by_uncertainty_quartile"] = [
+            (np.bincount(experts[quart == q], minlength=n_experts) / max(1, int((quart == q).sum()))).tolist()
+            for q in range(4)]
+        block["quartile_counts"] = [int((quart == q).sum()) for q in range(4)]
+        block["uncertainty_quartile_edges"] = edges.tolist()
+    return block
 
 # ─── Cross-Validation Run Function ──────────────────────────────────────────
 def run_cv(csv_path: str, cfg: DictConfig):
@@ -377,53 +419,24 @@ def run_cv(csv_path: str, cfg: DictConfig):
             model_size_bytes = print_size_of_model(final_model, "Original_Model")
 
 
-            if model_kind == "qmoe":
-                if platform.system() == "Darwin":  
-                    torch.backends.quantized.engine = 'qnnpack'
-                else:
-                    torch.backends.quantized.engine = 'fbgemm'
-                print(torch.backends.quantized.engine)
-                expert_quantizations = cfg.experiment.router.expert_quantizations
-                # ----- quantise experts once -------------
-                for i, exp in enumerate(final_model.experts):
-                    # Check if expert i should be quantized based on its position in the list
-                    # This assumes expert_quantizations is a list corresponding to expert indices
-                    if i < len(expert_quantizations) and "qesc" in expert_quantizations[i]:
-                        final_model.experts[i] = ptq_dynamic_int8(exp)
-                    
-                final_model.eval()
-                for param in final_model.parameters():
-                        param.requires_grad_(False)
-                val_start_time = time.perf_counter()
+            # PTQ single models and PTQ experts inside an MoE are int8-quantized
+            # here, after training, in both the "moe" and "qmoe" paths
+            eval_model = prepare_eval_model(str(model_kind), final_model, cfg)
+            for param in eval_model.parameters():
+                param.requires_grad_(False)
+            is_moe = model_kind in ("moe", "qmoe")
+            # fixed MC-dropout noise for the test pass, so the routing pass
+            # below sees exactly the same draws
+            torch.manual_seed(seed)
+            val_start_time = time.perf_counter()
+            if is_moe:
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True, max_iterations=1)
-                dur_val = time.perf_counter() - val_start_time
-            elif model_kind == "qesc":
-                if platform.system() == "Darwin":  
-                    torch.backends.quantized.engine = 'qnnpack'
-                else:
-                    torch.backends.quantized.engine = 'fbgemm'
-                print(torch.backends.quantized.engine)
-                qmodel = ptq_dynamic_int8(final_model)
-                val_start_time = time.perf_counter()
-                mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
-                    (_validate_single_epoch, (qmodel, te_ld, nn.CrossEntropyLoss(), device)),
-                    interval=0.01, retval=True, max_iterations=1)
-                dur_val = time.perf_counter() - val_start_time
-            elif model_kind == "moe":
-
-                val_start_time = time.perf_counter()
-                mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True, max_iterations=1)
-
-                dur_val = time.perf_counter() - val_start_time
-            
+                    memory_usage((_validate_moe_epoch, (eval_model, te_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True, max_iterations=1)
             else:
-                val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
-                    (_validate_single_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device)),
+                    (_validate_single_epoch, (eval_model, te_ld, nn.CrossEntropyLoss(), device)),
                     interval=0.01, retval=True, max_iterations=1)
-                dur_val = time.perf_counter() - val_start_time
+            dur_val = time.perf_counter() - val_start_time
 
             if track_emissions:
                 tracker_val.stop()
@@ -476,6 +489,29 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 "training_flops": float(training_flops),
                 "validation_flops": float(validation_flops)
             }
+            if is_moe:
+                # held-out routing: which expert each test sample reaches
+                n_exp = eval_model.num_experts
+                experts, unc, preds = route_test_fold(eval_model, te_ld, device, seed)
+                fold_result["routing"] = routing_fractions(experts, unc, n_exp)
+                fold_result["routing"]["matches_scored_pass"] = bool(np.array_equal(preds, np.asarray(y_pred)))
+                # Same weights, prior switched off at inference: the paired
+                # ablation that isolates what the precision prior itself does.
+                if (getattr(eval_model, "use_curiosity", False) and eval_model.curiosity_strategy == "precision_prior"
+                        and eval_model.curiosity_alpha != 0):
+                    alpha = eval_model.curiosity_alpha
+                    eval_model.curiosity_alpha = 0.0
+                    experts0, unc0, preds0 = route_test_fold(eval_model, te_ld, device, seed)
+                    eval_model.curiosity_alpha = alpha
+                    y_np = np.asarray(y_true)
+                    fold_result["alpha0_eval"] = {
+                        "f1_macro": float(f1_score(y_np, preds0, average="macro", zero_division=0)),
+                        "f1_weighted": float(f1_score(y_np, preds0, average="weighted", zero_division=0)),
+                        "accuracy": float(accuracy_score(y_np, preds0)),
+                        "expert_changed_fraction": float(np.mean(experts0 != experts)),
+                        "prediction_changed_fraction": float(np.mean(preds0 != preds)),
+                        "routing": routing_fractions(experts0, unc0, n_exp),
+                    }
             if track_emissions:
                 for k in cc_metrics_to_track:
                     fold_result[f"train_{k}"] = train_stats.get(k, 0.0)
@@ -521,6 +557,21 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "folds": fold_metrics
         }
         
+        if fold_metrics and all("routing" in f for f in fold_metrics):
+            summary["routing_overall_mean"] = np.mean([f["routing"]["overall"] for f in fold_metrics], axis=0).tolist()
+            if all("by_uncertainty_quartile" in f["routing"] for f in fold_metrics):
+                summary["routing_by_uncertainty_quartile_mean"] = np.mean(
+                    [f["routing"]["by_uncertainty_quartile"] for f in fold_metrics], axis=0).tolist()
+        alpha0 = [f["alpha0_eval"] for f in fold_metrics if "alpha0_eval" in f]
+        if alpha0:
+            summary["alpha0_eval"] = {
+                "f1_macro_mean": float(np.mean([a["f1_macro"] for a in alpha0])),
+                "f1_macro_std": float(np.std([a["f1_macro"] for a in alpha0])),
+                "accuracy_mean": float(np.mean([a["accuracy"] for a in alpha0])),
+                "expert_changed_fraction_mean": float(np.mean([a["expert_changed_fraction"] for a in alpha0])),
+                "note": "same checkpoints, precision prior off (alpha=0) at inference; per-fold values in folds[*].alpha0_eval",
+            }
+
         if all_max_ram_mb_train:
             summary["max_ram_mb_train_mean"] = float(np.mean(all_max_ram_mb_train))
             summary["max_ram_mb_train_std"] = float(np.std(all_max_ram_mb_train))

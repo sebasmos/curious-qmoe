@@ -3,7 +3,7 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 import torch.nn.functional as F
 from .models import reset_weights
-from .qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert, SharedTrunkMoE
+from .qmoe_layers import BitNetExpert158b, BitNetExpert, SharedTrunkMoE
 
 
 class qMoEModelBatched(nn.Module):
@@ -148,15 +148,11 @@ class qMoEModelBatched(nn.Module):
                     )
                 )
             elif bit_width == "popcount":
-                print("  -> Creating a BitNetPopcountExpert.")
-                experts.append(
-                    BitNetPopcountExpert(
-                        in_dim,
-                        num_classes,
-                        hidden_sizes=cfg.experiment.model.hidden_sizes,
-                        dropout_prob=cfg.experiment.model.dropout_prob,
-                    )
-                )
+                # BitwisePopcountLinear sums XOR'd bytes instead of counting
+                # set bits, so it does not compute an XNOR-popcount dot
+                # product, and it has no gradient path, so it cannot train.
+                raise ValueError("the 'popcount' expert is not a correct XNOR-popcount layer and "
+                                 "cannot be trained; it is not part of any paper configuration")
             else:
                 print(f"  -> Creating a standard BitNetExpert with num_bits={bit_width}.")
                 experts.append(
