@@ -1,87 +1,210 @@
 #!/usr/bin/env python3
-"""Confidence-distribution figure, redesigned in the architecture figure's
-pastel language: each expert wears its card color, jittered sample points show
-the raw distribution behind slim boxes, means as charcoal diamonds, honest
-measured annotation. Usage:
+"""Figure 2: classifier confidence of the held-out samples routed to each expert.
 
-    python generate_confidence_figure.py --routing-json <routing_results.json> \
-        --output <out.pdf>
+Reads the routing_results.json written by routing_analysis.py (one file, or the
+directory holding it, per router setting; one panel each, sharing the
+confidence axis). Schema used: config.expert_names (experts in config order,
+which is ascending precision in the paper runs), config.run_dir (the panel
+title takes alpha from its "_a<alpha>_" tag) and routing[*].expert /
+routing[*].confidence (the classifier's max class probability).
+
+Each expert row shows the density of its samples' confidence (reflected at
+1.0, cut at the observed range), the individual samples, the interquartile
+range as a bar and the median as a dot, plus n and the share of the panel's
+samples. Colors are one lavender hue, light to dark with precision, as in the
+Figure 1 expert cards. The p value is a two-sided Mann-Whitney U test of the
+highest-precision expert against all other samples in the panel, computed here
+from the plotted data.
+
+Usage:
+    python scripts/analysis/generate_confidence_figure.py \
+        --routing-json scripts/analysis/outputs-paper/routing_a0.3 \
+                       scripts/analysis/outputs-paper/routing_a1.0 \
+        --output confidence_distribution.pdf
 """
-import argparse, json
+import argparse
+import json
+import logging
+import re
+from pathlib import Path
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgb
+from matplotlib.transforms import blended_transform_factory
 from scipy import stats
 
-INK, SUBINK = "#1F2937", "#6B7280"
-FILLS = {0: "#E0D4FF", 1: "#B8E3FA", 2: "#FCC155"}
-EDGES = {0: "#9C7FD4", 1: "#5FA8D3", 2: "#DE9A1F"}
-NAMES = {0: "BitNet", 1: "Q4", 2: "Q8"}
-QUANT = {0: "ternary", 1: "4-bit", 2: "8-bit"}
+logging.getLogger("fontTools").setLevel(logging.ERROR)  # font subsetting chatter
 
-plt.rcParams.update({
+INK, INK2 = "#1a1a19", "#52514e"          # primary and secondary text
+GRID, AXIS = "#e1e0d9", "#a9a89f"         # hairline grid, baseline
+LIGHT, DARK = "#b09ee3", "#6140a0"        # lavender ramp ends (OKLCH h=296)
+RAMP3 = ["#b09ee3", "#896cc9", "#6140a0"]  # validated ordinal ramp, 3 experts
+
+RC = {
     "font.family": "sans-serif",
-    "font.sans-serif": ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
-    "mathtext.fontset": "dejavusans",
-})
+    "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
+    "font.size": 7.5,
+    "pdf.fonttype": 42,                   # embedded TrueType, no Type 3
+    "axes.linewidth": 0.6,
+    "xtick.major.width": 0.6,
+    "xtick.major.size": 2.5,
+    "xtick.major.pad": 2,
+}
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--routing-json", required=True)
-ap.add_argument("--output", required=True)
-args = ap.parse_args()
 
-data = json.load(open(args.routing_json))
-conf = {}
-for r in data["routing"]:
-    conf.setdefault(r["expert"], []).append(r["confidence"])
-total = sum(len(v) for v in conf.values())
+def tint(c, a):
+    """Opaque mix of color c with white (a = share of c), for print-safe fills."""
+    return tuple(a * np.array(to_rgb(c)) + (1 - a))
 
-rng = np.random.default_rng(42)
-fig, ax = plt.subplots(figsize=(8.6, 5.4))
-for e in (0, 1, 2):
-    vals = np.array(conf.get(e, []))
-    if not len(vals):
-        continue
-    x = e + 1
-    # jittered raw samples (capped) behind the box
-    show = vals if len(vals) <= 260 else rng.choice(vals, 260, replace=False)
-    ax.scatter(x + rng.uniform(-0.16, 0.16, len(show)), show, s=11,
-               color=EDGES[e], alpha=0.22, linewidths=0, zorder=1)
-    # slim pastel box
-    bp = ax.boxplot([vals], positions=[x], widths=0.44, patch_artist=True,
-                    showfliers=False, zorder=2,
-                    boxprops=dict(fc=FILLS[e], ec=EDGES[e], lw=1.4, alpha=0.92),
-                    medianprops=dict(color=INK, lw=2.0),
-                    whiskerprops=dict(color=EDGES[e], lw=1.3),
-                    capprops=dict(color=EDGES[e], lw=1.3))
-    ax.plot(x, vals.mean(), marker="D", ms=6.5, color=INK, zorder=3)
 
-# honest measured annotation, neutral chip style
-q8 = np.array(conf.get(2, [])); others = np.array(conf.get(0, []) + conf.get(1, []))
-t, pval = stats.ttest_ind(q8, others)
-rel = (1 - q8.mean() / others.mean()) * 100
-sig = f"p = {pval:.3f}" + (", n.s." if pval >= 0.05 else "")
-ax.text(1.0, 1.045,
-        f"Q8 mean {rel:.0f}% lower ({sig})",
-        transform=ax.transAxes, ha="right", va="bottom", fontsize=14, color=SUBINK,
-        bbox=dict(boxstyle="round,pad=0.45", fc="#F6F6F8", ec="none"), clip_on=False)
+def ramp(n):
+    if n == 3:
+        return RAMP3
+    a, b = np.array(to_rgb(LIGHT)), np.array(to_rgb(DARK))
+    return [tuple(a + (b - a) * t) for t in np.linspace(0, 1, max(n, 2))][:n]
 
-ax.set_xticks([1, 2, 3])
-ax.set_xticklabels([f"{NAMES[e]}\n{QUANT[e]}  ·  {100*len(conf.get(e,[]))/total:.0f}% of samples"
-                    for e in (0, 1, 2)], fontsize=14, color=INK)
-ax.set_ylabel("Prediction confidence", fontsize=15, color=INK)
-lo = min(min(v) for v in conf.values())
-ax.set_ylim(lo - 0.035, 1.045)
-ax.yaxis.grid(True, color="#E5E7EB", lw=0.8)
-ax.set_axisbelow(True)
-for side in ("top", "right"):
-    ax.spines[side].set_visible(False)
-for side in ("left", "bottom"):
-    ax.spines[side].set_color("#D1D5DB")
-ax.tick_params(colors=SUBINK, labelsize=13)
 
-plt.tight_layout(rect=(0, 0, 1, 0.94))
-plt.savefig(args.output, bbox_inches="tight")
-plt.savefig("/tmp/fig2_review.png", dpi=140, bbox_inches="tight")
-print("saved", args.output)
+def load_routing(path):
+    """One panel's data from a routing_results.json (or its directory)."""
+    p = Path(path)
+    if p.is_dir():
+        p = p / "routing_results.json"
+    d = json.loads(p.read_text())
+    cfg, recs = d.get("config", {}), d["routing"]
+    names = cfg.get("expert_names")
+    if not names:
+        by_id = {r["expert"]: r.get("expert_name", f"E{r['expert']}") for r in recs}
+        names = [by_id.get(i, f"E{i}") for i in range(max(by_id) + 1)]
+    conf = [np.array([r["confidence"] for r in recs if r["expert"] == e], float)
+            for e in range(len(names))]
+    m = re.search(r"_a(\d+(?:\.\d+)?)(?:_|/|$)", str(cfg.get("run_dir") or "")) \
+        or re.search(r"_a(\d+(?:\.\d+)?)$", p.parent.name)
+    title = f"α = {m.group(1)}" if m else p.parent.name
+    return {"title": title, "names": list(names), "conf": conf, "total": len(recs)}
+
+
+def compare_top(panel):
+    """Two-sided Mann-Whitney U: highest-precision expert vs every other sample."""
+    if len(panel["conf"]) < 2:
+        return None
+    top, rest = panel["conf"][-1], np.concatenate(panel["conf"][:-1])
+    if len(top) < 2 or len(rest) < 2:
+        return None
+    p = stats.mannwhitneyu(top, rest, alternative="two-sided").pvalue
+    return {"name": panel["names"][-1], "n_top": len(top), "n_rest": len(rest),
+            "median_top": float(np.median(top)), "median_rest": float(np.median(rest)),
+            "p": float(p)}
+
+
+def density(v, grid):
+    """Gaussian KDE (Silverman bandwidth), reflected at 1.0 so mass piled
+    at full confidence is not lost past the bound."""
+    sd, iqr = v.std(ddof=1), np.subtract(*np.percentile(v, [75, 25]))
+    s = min(sd, iqr / 1.34) if iqr > 0 else sd
+    h = max(0.9 * s * len(v) ** -0.2, 0.012)
+    z = np.concatenate([v, 2.0 - v])
+    return np.exp(-0.5 * ((grid[:, None] - z[None, :]) / h) ** 2).sum(1)
+
+
+def fmt_p(p):
+    return "p < 0.001" if p < 0.001 else f"p = {p:.2g}"   # 2 s.f.: 0.046 stays 0.046
+
+
+def draw_panel(ax, panel, rng):
+    names, colors = panel["names"], ramp(len(panel["names"]))
+    k = len(names)
+    lab = blended_transform_factory(ax.transAxes, ax.transData)
+    for e, (name, v, c) in enumerate(zip(names, panel["conf"], colors)):
+        y = k - 1 - e                     # lowest precision on top
+        share = 100 * len(v) / panel["total"] if panel["total"] else 0
+        ax.text(-0.03, y + 0.05, name, transform=lab, ha="right", va="bottom",
+                fontsize=8, color=INK)
+        ax.text(-0.03, y + 0.01, f"n = {len(v):,} ({share:.0f}%)", transform=lab,
+                ha="right", va="top", fontsize=7, color=INK2)
+        if not len(v):
+            continue
+        if len(v) >= 5 and v.std() > 0:
+            grid = np.linspace(v.min(), v.max(), 256)
+            dens = density(v, grid)
+            top = y + 0.13 + 0.36 * dens / dens.max()
+            ax.fill_between(grid, y + 0.13, top, color=tint(c, 0.35), lw=0, zorder=1)
+            ax.plot(grid, top, color=c, lw=0.8, zorder=2, solid_capstyle="round")
+        ax.scatter(v, y - 0.24 + rng.uniform(-0.08, 0.08, len(v)), s=1.4,
+                   color=c, alpha=0.8 if len(v) <= 150 else 0.4, lw=0, zorder=2)
+        q1, med, q3 = np.percentile(v, [25, 50, 75])
+        ax.plot([q1, q3], [y, y], color=c, lw=3.0, solid_capstyle="butt", zorder=3)
+        ax.scatter([med], [y], s=15, color=INK, edgecolor="white", lw=0.8, zorder=4)
+    ax.set_ylim(-0.38, k - 0.48)
+    ax.set_yticks([])
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    ax.spines["bottom"].set_color(AXIS)
+    ax.xaxis.grid(True, color=GRID, lw=0.5)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="x", colors=INK2, labelsize=7, length=2.5)
+    ax.set_title(panel["title"], loc="left", fontsize=8, color=INK, pad=2)
+    t = compare_top(panel)
+    if t:
+        ax.set_title(f"{t['name']} vs others, Mann-Whitney {fmt_p(t['p'])}",
+                     loc="right", fontsize=7, color=INK2, pad=2)
+    return t
+
+
+def make_figure(panels, output, stamp=None):
+    """Exact 3.25 in width (half of a 6.5 in text width), so the point sizes
+    set here are the printed sizes."""
+    lo = min(min((v.min() for v in p["conf"] if len(v)), default=1.0) for p in panels)
+    xmin = min(0.2, np.floor(lo * 10) / 10)
+    rng = np.random.default_rng(0)
+    W, ROW, LEFT, RIGHT, TITLE, GAP, BOTTOM = 3.25, 0.34, 0.80, 0.09, 0.17, 0.12, 0.36
+    TOP = 0.03 + (0.15 if stamp else 0)
+    heights = [ROW * len(p["names"]) for p in panels]
+    H = TOP + sum(heights) + TITLE * len(panels) + GAP * (len(panels) - 1) + BOTTOM
+    with plt.rc_context(RC):
+        fig = plt.figure(figsize=(W, H))
+        axes, y = [], H - TOP
+        for h in heights:
+            y -= TITLE + h
+            axes.append(fig.add_axes([LEFT / W, y / H, (W - LEFT - RIGHT) / W, h / H],
+                                     sharex=axes[0] if axes else None))
+            y -= GAP
+        tests = [draw_panel(ax, p, rng) for ax, p in zip(axes, panels)]
+        for ax in axes[:-1]:
+            ax.tick_params(axis="x", labelbottom=False, length=0)
+        ax = axes[-1]
+        ax.set_xlim(xmin - 0.01, 1.01)
+        ax.set_xticks(np.round(np.arange(np.ceil(xmin * 5) / 5, 1.0001, 0.2), 1))
+        ax.set_xlabel("Classifier confidence (max class probability)",
+                      fontsize=7.5, color=INK, labelpad=3)
+        if stamp:
+            fig.text(0.06 / W, 1 - 0.03 / H, stamp, ha="left", va="top",
+                     fontsize=7, color="#b42318", style="italic")
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output)
+        plt.close(fig)
+    return tests
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--routing-json", nargs="+", required=True,
+                    help="routing_results.json file(s) or their directories, one panel each")
+    ap.add_argument("--output", required=True, help="output PDF")
+    ap.add_argument("--stamp", default=None, help="optional note printed above the plot")
+    args = ap.parse_args(argv)
+    panels = [load_routing(p) for p in args.routing_json]
+    tests = make_figure(panels, args.output, args.stamp)
+    for p, t in zip(panels, tests):
+        meds = ", ".join(f"{n} {np.median(v):.3f} (n={len(v)})" if len(v) else f"{n} - (n=0)"
+                         for n, v in zip(p["names"], p["conf"]))
+        print(f"{p['title']}: medians {meds}")
+        if t:
+            print(f"  {t['name']} vs others, two-sided Mann-Whitney U: p = {t['p']:.4g}")
+    print("saved", args.output)
+
+
+if __name__ == "__main__":
+    main()
