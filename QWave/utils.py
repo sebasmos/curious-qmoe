@@ -41,6 +41,8 @@ def set_seed(seed):
         random.seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False # Set to False for reproducibility, True for performance
+        # seeded generator for DataLoader shuffling
+        return torch.Generator().manual_seed(seed)
 
 
 def store_pickle_model(model, model_name, seed, model_path):

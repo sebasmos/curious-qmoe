@@ -10,8 +10,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from QWave.graphics import plot_training_curves, plot_multiclass_roc_curve, plot_losses, show_image, save_confusion_matrix, plot_confusion_matrix
 
 # This _validate_single_epoch function is correct and should be imported/used by train_pytorch_local
-def _validate_single_epoch(model, val_loader, criterion, device):
-    """Performs a single validation epoch and collects metrics."""
+def _validate_single_epoch(model, val_loader, criterion, device, average="macro"):
+    """Performs a single validation epoch and collects metrics.
+
+    The returned F1 uses `average` (macro by default, the paper's primary
+    metric); it is what train_pytorch_local selects checkpoints on."""
     model.eval()
     epoch_val_loss = 0
     all_labels, all_preds, all_probs = [], [], []
@@ -41,14 +44,18 @@ def _validate_single_epoch(model, val_loader, criterion, device):
     if len(all_labels) == 0:
         f1 = 0.0
     else:
-        f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
-    
+        f1 = f1_score(all_labels, all_preds, average=average, zero_division=0)
+
     return epoch_val_loss, f1, all_labels, all_preds, all_probs
 
 
 def train_pytorch_local(args, model, train_loader, val_loader, class_weights, num_columns, device, fold_folder,
                         resume_checkpoint=False, checkpoint_path=None):
+    # val_loader drives early stopping, the LR scheduler and checkpoint
+    # selection, so it must never be the fold that is reported (benchmark.py
+    # passes an inner validation split carved out of the training folds).
     best_f1 = -1.0 # Initialize with a value that any valid F1 will beat
+    best_state = None
     patience_counter = 0
     model = model.to(device)
 
@@ -92,10 +99,11 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
         if f1 > best_f1:
             best_f1 = f1
             patience_counter = 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             if getattr(args, "save_checkpoint", True):
                 torch.save(model.state_dict(), os.path.join(fold_folder, "best_model.pth"))
                 # print(f"Saved best model with F1: {best_f1:.4f} at epoch {epoch+1}")
-            
+
             # Update best epoch metrics
             all_labels_best_epoch = current_labels
             all_preds_best_epoch = current_preds
@@ -114,8 +122,13 @@ def train_pytorch_local(args, model, train_loader, val_loader, class_weights, nu
     else:
         print(f"Warning: No valid data to plot confusion matrix for fold: {fold_folder}. Val loader might be empty or training ended too early.")
 
+    # Hand back the selected (best validation epoch) weights, not the last
+    # epoch's, so a caller that skips reloading best_model.pth still
+    # evaluates the selected checkpoint.
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
-    # Return the model (or its final state), losses, best F1, and metrics from the best validation epoch
+    # Return the selected model, losses, best F1, and metrics from the best validation epoch
     return model, train_losses, val_losses, best_f1, all_labels_best_epoch, all_preds_best_epoch, all_probs_best_epoch
 
 def _validate_single_epoch_adapter(model, val_loader, criterion, device, task_type='multiclass'):

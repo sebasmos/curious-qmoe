@@ -12,6 +12,8 @@ experiment:
   models_to_run: [esc]
   device: "mps"  # or "cuda", "mps", or "cpu"
   track_emissions: false  # Set to true to enable carbon tracking (requires sudo on macOS)
+  seed: 0  # run seed: init, dropout, MC dropout, loader shuffling and the inner validation split
+  num_threads: null  # torch intra-op threads; null keeps the torch default
   datasets:
     esc:
       csv: /Users/cajas.sebastian/Documents/DATASETS/Urban8k/efficientnet/urbansound8k.csv
@@ -62,10 +64,11 @@ experiment:
     # expert_quantizations: [1, 1, 1, 1]
     
   cross_validation:
-    n_splits: 5
+    n_splits: 10
+    fold_column: folder  # leave-one-fold-out on the 10 official UrbanSound8K folds
     shuffle: true
-    random_seed: 42
-    validation_split_ratio: 0.1
+    random_seed: 42  # StratifiedKFold seed, used only when fold_column is null
+    validation_split_ratio: 0.1  # inner split of the training folds, used for model selection
 
   logging:
     log_interval: 50

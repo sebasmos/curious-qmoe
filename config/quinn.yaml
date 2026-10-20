@@ -12,6 +12,8 @@ experiment:
   models_to_run: [esc]
   device: "mps"  # or "cuda", "mps", or "cpu"
   track_emissions: false  # Set to true to enable carbon tracking (requires sudo on macOS)
+  seed: 0  # run seed: init, dropout, MC dropout, loader shuffling and the inner validation split
+  num_threads: null  # torch intra-op threads; null keeps the torch default
   datasets:
     esc:
       csv: /Users/cajas.sebastian/Documents/DATASETS/Quinn/efficientnet_ABGQI/ABGQI_embeddings_torch.csv
@@ -63,9 +65,10 @@ experiment:
     
   cross_validation:
     n_splits: 5
+    fold_column: null  # no official folds: StratifiedKFold below, identical for every run seed
     shuffle: true
-    random_seed: 42
-    validation_split_ratio: 0.1
+    random_seed: 42  # StratifiedKFold seed, fixed so arms and seeds share test folds
+    validation_split_ratio: 0.1  # inner split of the training folds, used for model selection
 
   logging:
     log_interval: 50

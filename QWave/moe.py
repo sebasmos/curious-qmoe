@@ -477,6 +477,9 @@ class Router(nn.Module):
 
 
 def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_weights, in_dim, device, fold_dir, resume, ckpt_path):
+    # val_loader drives early stopping and checkpoint selection, so it must
+    # never be the fold that is reported (benchmark.py passes an inner
+    # validation split carved out of the training folds).
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.experiment.router.lr_moe_train)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
@@ -543,7 +546,7 @@ def train_moe_local(cfg, load_balancing, model, train_loader, val_loader, class_
                 all_labels.extend(y.cpu().numpy())
 
         accuracy = accuracy_score(all_labels, all_preds)
-        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+        f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
 
         print(
             f"Epoch {epoch+1}/{cfg.experiment.model.epochs}, "
@@ -668,7 +671,7 @@ def _validate_moe_epoch(model, val_loader, criterion, device, fold_dir: str = "o
         print(f"[INFO] Saved curiosity-per-class plot to {class_path}")
 
     else:
-        print("[INFO] No curiosity values found — router is deterministic.")
+        print("[INFO] No curiosity values found, router is deterministic.")
 
     return 0, 0, all_labels, all_preds, all_probs
 

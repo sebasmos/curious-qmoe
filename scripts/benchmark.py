@@ -75,10 +75,9 @@ from pathlib import Path
 import os, sys, json, time, warnings
 
 import hydra
-from omegaconf import DictConfig, open_dict, ListConfig
+from omegaconf import DictConfig, OmegaConf, open_dict, ListConfig
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score
 
 import torch
@@ -92,11 +91,11 @@ ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 
 # ─── QWave ------------------------------------------------------------------
-from QWave.datasets import EmbeddingAdaptDataset
+from QWave.datasets import EmbeddingAdaptDataset, make_outer_folds, inner_split
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.models import ESCModel
 from QWave.memory import print_size_of_model, _load_cc_csv
-from QWave.utils import get_device, get_num_parameters
+from QWave.utils import get_device, get_num_parameters, set_seed
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
 from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b
 from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
@@ -158,6 +157,16 @@ cc_metrics_to_track = [
     "cpu_count", "cpu_model", "gpu_count", "gpu_model", "ram_total_size",
 ]
 
+# Bumped whenever the evaluation protocol changes, so the collector can refuse
+# to pool summaries produced under different protocols. 2 = predefined folds
+# where they exist, inner validation split for model selection, per-fold
+# seeding, macro F1 primary.
+PROTOCOL_VERSION = 2
+
+def checkpoint_name(model_kind: str) -> str:
+    """train_moe_local writes best.pth, train_pytorch_local best_model.pth."""
+    return "best.pth" if model_kind in ("moe", "qmoe") else "best_model.pth"
+
 # ─── Cross-Validation Run Function ──────────────────────────────────────────
 def run_cv(csv_path: str, cfg: DictConfig):
     device = get_device(cfg)
@@ -191,7 +200,16 @@ def run_cv(csv_path: str, cfg: DictConfig):
         print(f"[ERROR] Not enough samples ({len(df_feat)}) for {cfg.experiment.cross_validation.n_splits} folds. Please adjust n_splits or provide more data.")
         return {}
 
-    skf = StratifiedKFold(cfg.experiment.cross_validation.n_splits, shuffle=True, random_state=42)
+    cv_cfg = cfg.experiment.cross_validation
+    folds = make_outer_folds(df_full, labels, cv_cfg)
+    fold_scheme = ({"type": "predefined", "column": str(cv_cfg.fold_column)} if cv_cfg.get("fold_column")
+                   else {"type": "stratified_kfold", "n_splits": int(cv_cfg.n_splits),
+                         "random_state": int(cv_cfg.get("random_seed", 42))})
+    inner_val_ratio = float(cv_cfg.get("validation_split_ratio", 0.1))
+    seed = int(cfg.experiment.get("seed", 0))
+    if cfg.experiment.get("num_threads"):
+        torch.set_num_threads(int(cfg.experiment.num_threads))
+    print(f"Folds: {fold_scheme} | seed {seed} | inner val {inner_val_ratio} | torch threads {torch.get_num_threads()}")
 
     to_run = cfg.experiment.get("models_to_run", ["bitnet", "bitnet158b", "esc"])
     if isinstance(to_run, ListConfig):
@@ -206,8 +224,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
         print(f"\n===== MODEL: {model_kind} =====")
         model_out = out_dir / model_kind
         model_out.mkdir(exist_ok=True)
+        # resolved config next to the checkpoints, so analysis scripts can
+        # rebuild the exact model and data split from the run directory alone
+        OmegaConf.save(cfg, model_out / "config.yaml", resolve=True)
 
-        all_final_accuracy_scores, all_final_f1_scores = [], []
+        all_final_accuracy_scores, all_final_f1_scores, all_final_f1_weighted = [], [], []
         all_training_durations, all_validation_durations = [], []
         all_max_ram_mb_train, all_max_ram_mb_val = [], []
         all_training_flops, all_validation_flops = [], []
@@ -227,26 +248,45 @@ def run_cv(csv_path: str, cfg: DictConfig):
         print(f"Params: {moe_parameter_count:,}")
         del dummy_model_for_params
 
-        for fold, (tr_idx, vl_idx) in enumerate(skf.split(np.zeros(len(labels)), labels), 1):
-            print(f"── Fold {fold}/{skf.n_splits}")
+        for fold, tr_idx, te_idx in folds:
+            print(f"── Fold {fold} ({len(folds)} folds)")
             fold_dir = model_out / f"fold_{fold}"
             fold_dir.mkdir(exist_ok=True)
 
+            # Seed everything at the start of each fold, so any single fold is
+            # reproducible on its own: init, dropout, MC dropout, loader order
+            # and the inner split all follow the run seed.
+            loader_gen = set_seed(seed)
+            # Model selection runs on an inner validation split of the
+            # training folds; the held-out fold te_idx is evaluated once, at
+            # the end, with the selected checkpoint.
+            fit_idx, iv_idx = inner_split(tr_idx, labels, inner_val_ratio, seed)
+            with open(fold_dir / "split.json", "w") as fp:
+                json.dump({"fold": fold, "seed": seed, "fold_scheme": fold_scheme,
+                           "test_idx": te_idx.tolist(), "inner_val_idx": iv_idx.tolist()}, fp)
+
             # datasets ───────────────────────────────────────────────────
+            # the scaler is fit on the fit portion only, then applied to the
+            # inner validation split and the test fold
             tr_ds = EmbeddingAdaptDataset(
-                df_feat.iloc[tr_idx].reset_index(drop=True),
+                df_feat.iloc[fit_idx].reset_index(drop=True),
                 normalization_type=cfg.experiment.datasets.esc.normalization_type)
-            vl_ds = EmbeddingAdaptDataset(
-                df_feat.iloc[vl_idx].reset_index(drop=True),
+            iv_ds = EmbeddingAdaptDataset(
+                df_feat.iloc[iv_idx].reset_index(drop=True),
                 normalization_type=cfg.experiment.datasets.esc.normalization_type,
                 scaler=tr_ds.get_scaler())
-            
-            if len(tr_ds) == 0 or len(vl_ds) == 0:
-                print(f"[WARN] Fold {fold} has empty train or validation dataset. Skipping this fold.")
+            te_ds = EmbeddingAdaptDataset(
+                df_feat.iloc[te_idx].reset_index(drop=True),
+                normalization_type=cfg.experiment.datasets.esc.normalization_type,
+                scaler=tr_ds.get_scaler())
+
+            if len(tr_ds) == 0 or len(iv_ds) == 0 or len(te_ds) == 0:
+                print(f"[WARN] Fold {fold} has an empty train, inner validation or test set. Skipping this fold.")
                 continue
 
-            tr_ld = DataLoader(tr_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True)
-            vl_ld = DataLoader(vl_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
+            tr_ld = DataLoader(tr_ds, batch_size=cfg.experiment.model.batch_size, shuffle=True, generator=loader_gen)
+            iv_ld = DataLoader(iv_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
+            te_ld = DataLoader(te_ds, batch_size=cfg.experiment.model.batch_size, shuffle=False)
 
             # model ──────────────────────────────────────────────────────
             # expose the fold index so per-fold warm-start paths resolve to a
@@ -254,28 +294,29 @@ def run_cv(csv_path: str, cfg: DictConfig):
             with open_dict(cfg):
                 cfg.experiment.current_fold = fold
             model = build_model(str(model_kind), in_dim, num_classes, cfg).to(device)
-            
+
+            # FLOPs are traced on fixed rows rather than a loader batch, so
+            # counting does not draw from the training loader's generator
+            bs = cfg.experiment.model.batch_size
             if len(tr_ld) > 0:
-                sample_input_train, _ = next(iter(tr_ld))
-                sample_input_train = sample_input_train.to(device)
+                sample_input_train = tr_ds.features[:bs].to(device)
                 flops_train_analyzer = FlopCountAnalysis(model, sample_input_train)
                 training_flops = flops_train_analyzer.total() * cfg.experiment.model.epochs * len(tr_ld)
                 all_training_flops.append(training_flops)
             else:
                 all_training_flops.append(0)
 
-            if len(vl_ld) > 0:
-                sample_input_val, _ = next(iter(vl_ld))
-                sample_input_val = sample_input_val.to(device)
+            if len(te_ld) > 0:
+                sample_input_val = te_ds.features[:bs].to(device)
                 flops_val_analyzer = FlopCountAnalysis(model, sample_input_val)
-                validation_flops = flops_val_analyzer.total() * len(vl_ld)
+                validation_flops = flops_val_analyzer.total() * len(te_ld)
                 all_validation_flops.append(validation_flops)
             else:
                 all_validation_flops.append(0)
 
             class_weights = torch.tensor(1/np.bincount(tr_ds.labels.numpy()), dtype=torch.float32).to(device)
 
-            ckpt_path = fold_dir / "best.pth"
+            ckpt_path = fold_dir / checkpoint_name(str(model_kind))
 
             # training ───────────────────────────────────────────────────
             track_emissions = cfg.experiment.get("track_emissions", False)
@@ -288,25 +329,25 @@ def run_cv(csv_path: str, cfg: DictConfig):
             if model_kind == "moe" or model_kind == "qmoe":
                 print(f"Training {model_kind} model...")
                 load_balancing = cfg.experiment.router.load_balancing # Use load balancing from config
-                mem_train_usage, (state_dict, train_losses, val_losses, best_f1, all_labels_best, all_preds_best, _) = \
-                    memory_usage((train_moe_local, (cfg, load_balancing, model, tr_ld, vl_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True)
-            else: 
+                mem_train_usage, (state_dict, train_losses, val_losses, inner_val_f1, all_labels_best, all_preds_best, _) = \
+                    memory_usage((train_moe_local, (cfg, load_balancing, model, tr_ld, iv_ld, class_weights, in_dim, device, str(fold_dir), False, ckpt_path)), interval=0.1, retval=True, max_iterations=1)
+            else:
                 mem_train_usage, (
-                    model_trained, train_losses, val_losses, best_f1_from_train,
+                    model_trained, train_losses, val_losses, inner_val_f1,
                     all_labels_best_epoch, all_preds_best_epoch, all_probs_best_epoch
                 ) = memory_usage(
                     (train_pytorch_local, (
                         cfg.experiment,
                         model,
                         tr_ld,
-                        vl_ld,
+                        iv_ld,
                         class_weights,
                         in_dim,
                         device,
                         str(fold_dir),
                         False,
                         str(ckpt_path)
-                    )), interval=0.1, retval=True)
+                    )), interval=0.1, retval=True, max_iterations=1)
 
             if track_emissions:
                 tracker_tr.stop()
@@ -339,7 +380,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                                               project_name=f"{tag}_{model_kind}_fold{fold}_val")
                 tracker_val.start()
         
-            print_size_of_model(final_model, "Original_Model")
+            model_size_bytes = print_size_of_model(final_model, "Original_Model")
 
 
             if model_kind == "qmoe":
@@ -367,7 +408,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                         param.requires_grad_(False)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
+                    memory_usage((_validate_moe_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True, max_iterations=1)
                 dur_val = time.perf_counter() - val_start_time
             elif model_kind == "qesc":
                 if platform.system() == "Darwin":  
@@ -378,22 +419,22 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 qmodel = torch.quantization.quantize_dynamic(final_model, {nn.Linear}, dtype=torch.qint8)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
-                    (_validate_single_epoch, (qmodel, vl_ld, nn.CrossEntropyLoss(), device)),
-                    interval=0.01, retval=True)
+                    (_validate_single_epoch, (qmodel, te_ld, nn.CrossEntropyLoss(), device)),
+                    interval=0.01, retval=True, max_iterations=1)
                 dur_val = time.perf_counter() - val_start_time
             elif model_kind == "moe":
 
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = \
-                    memory_usage((_validate_moe_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True)
+                    memory_usage((_validate_moe_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device, str(fold_dir))), interval=0.01, retval=True, max_iterations=1)
 
                 dur_val = time.perf_counter() - val_start_time
             
             else:
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
-                    (_validate_single_epoch, (final_model, vl_ld, nn.CrossEntropyLoss(), device)),
-                    interval=0.01, retval=True)
+                    (_validate_single_epoch, (final_model, te_ld, nn.CrossEntropyLoss(), device)),
+                    interval=0.01, retval=True, max_iterations=1)
                 dur_val = time.perf_counter() - val_start_time
 
             if track_emissions:
@@ -412,24 +453,36 @@ def run_cv(csv_path: str, cfg: DictConfig):
                     all_val_cc_data_agg[k].append(0.0)
 
             final_accuracy = accuracy_score(y_true, y_pred)
+            final_f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
             final_f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
             all_final_accuracy_scores.append(final_accuracy)
-            all_final_f1_scores.append(final_f1_weighted)
+            all_final_f1_scores.append(final_f1_macro)
+            all_final_f1_weighted.append(final_f1_weighted)
 
-            print(f"    Fold {fold} Results:")
-            print(f"        F1 Score (Weighted): {final_f1_weighted:.4f}")
-            print(f"        Validation RAM Usage (Max MB): {max_ram_mb_val:.2f}")
-            print(f"        Validation Inference Time (s): {dur_val:.4f}")
+            print(f"    Fold {fold} Results (held-out test fold):")
+            print(f"        F1 Score (Macro): {final_f1_macro:.4f} | Weighted: {final_f1_weighted:.4f} | Acc: {final_accuracy:.4f}")
+            print(f"        Test-pass RAM Usage (Max MB): {max_ram_mb_val:.2f}")
+            print(f"        Test-pass duration, whole fold (s): {dur_val:.4f}")
 
             plot_losses(train_losses, val_losses, str(fold_dir))
             plot_multiclass_roc_curve(y_true, y_prob, EXPERIMENT_NAME=str(fold_dir))
 
             fold_result = {
-                "best_f1": final_f1_weighted,
-                "accuracy": final_accuracy,
+                "fold": int(fold),
+                "seed": seed,
+                "n_fit": int(len(fit_idx)),
+                "n_inner_val": int(len(iv_idx)),
+                "n_test": int(len(te_idx)),
+                "f1_macro": float(final_f1_macro),
+                "f1_weighted": float(final_f1_weighted),
+                "accuracy": float(final_accuracy),
+                "inner_val_f1_macro": float(inner_val_f1),  # selection score of the chosen checkpoint
+                "model_size_bytes": float(model_size_bytes),
                 "max_ram_mb_train": float(max_ram_mb_train),
-                "max_ram_mb_val": float(max_ram_mb_val), # Peak memory (RAM) during validation
+                "max_ram_mb_val": float(max_ram_mb_val), # peak process RSS during the test-fold pass
                 "training_duration_seconds": float(dur_tr),
+                # whole test-fold pass under memory_profiler, NOT per-sample
+                # latency (scripts/analysis/efficiency_benchmark.py measures that)
                 "validation_duration_seconds": float(dur_val),
                 "parameter_count": int(moe_parameter_count), # Parameter count
                 "training_flops": float(training_flops),
@@ -449,9 +502,21 @@ def run_cv(csv_path: str, cfg: DictConfig):
             fold_metrics.append(fold_result)
 
         # model summary JSON ──────────────────────────────────────────────────
+        # Per-fold values (with fold ids and the seed) live in "folds", so the
+        # collector can pair arms on (seed, fold); the means and population
+        # stds here cover this run's folds only and are for a quick look.
         summary = {
-            "f1_mean": float(np.mean(all_final_f1_scores)),
-            "f1_std": float(np.std(all_final_f1_scores)),
+            "protocol_version": PROTOCOL_VERSION,
+            "model_kind": str(model_kind),
+            "seed": seed,
+            "fold_scheme": fold_scheme,
+            "inner_val_ratio": inner_val_ratio,
+            "primary_metric": "f1_macro",
+            "num_threads": torch.get_num_threads(),
+            "f1_macro_mean": float(np.mean(all_final_f1_scores)),
+            "f1_macro_std": float(np.std(all_final_f1_scores)),
+            "f1_weighted_mean": float(np.mean(all_final_f1_weighted)),
+            "f1_weighted_std": float(np.std(all_final_f1_weighted)),
             "accuracy_mean": float(np.mean(all_final_accuracy_scores)),
             "accuracy_std": float(np.std(all_final_accuracy_scores)),
             "training_duration_mean_seconds": float(np.mean(all_training_durations)),
@@ -499,10 +564,10 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "name": model_name_for_csv, # Changed this line
             "Param. Count": summary.get("parameter_count"),
             "Acc (Mean)": summary.get("accuracy_mean"),
-            "F1 (Mean)": summary.get("f1_mean"),
+            "F1 macro (Mean)": summary.get("f1_macro_mean"),
             "Infer. RAM (GB)": summary.get("max_ram_mb_val_mean", 0.0) / 1024,
             "Train. Runtime (s)": summary.get("training_duration_mean_seconds"),
-            "Latency (s)": summary.get("validation_duration_mean_seconds"),
+            "Test pass, whole fold (s)": summary.get("validation_duration_mean_seconds"),
             "Energy-train": summary.get("train_energy_consumed_mean"),
             "Energy-val": summary.get("val_energy_consumed_mean"),
             "Emissions-train": summary.get("train_emissions_mean"),

@@ -112,11 +112,14 @@ def print_size_of_model(model, label="", debug=False):
         print(f"model: {label} \t Size (KB): {size_bytes/1e3:.3f} [quantized]")
         return size_bytes
     else:
-        # Fallback: save and measure for non-quantized models
-        torch.save(model.state_dict(), "temp.p")
-        size = os.path.getsize("temp.p")
+        # Fallback: serialize and measure for non-quantized models. In memory
+        # rather than a shared temp.p in the cwd, so parallel runs cannot
+        # delete each other's file between save and getsize.
+        import io
+        buf = io.BytesIO()
+        torch.save(model.state_dict(), buf)
+        size = buf.getbuffer().nbytes
         print(f"model: {label} \t Size (KB): {size/1e3:.3f}")
-        os.remove('temp.p')
         return size
     
 def get_memory_usage():
