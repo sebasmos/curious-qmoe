@@ -19,7 +19,13 @@ Statistics
 - Latency (from the efficiency benchmark) is compared with a two-sided
   Mann-Whitney U test and Levene's test on the per-call timings.
 
-    python scripts/collect_paper_numbers.py [--outputs outputs] \\
+The reviewer experiments (scripts/reproduce_paper.sh --list-extra and
+--analysis-extra: cascades, mixed precision, parameter-matched singles,
+ESC-50 at 50 classes, AST embeddings) get their own tables and test families
+under "extra" in the JSON, so every table above is unchanged by them. They may
+live in a second outputs directory; pass every directory to --outputs.
+
+    python scripts/collect_paper_numbers.py [--outputs outputs [more ...]] \\
         [--json outputs/paper_numbers.json] [--tex-dir outputs/paper_tables]
 """
 from __future__ import annotations
@@ -61,6 +67,23 @@ LABELS = {
     "mc1": "M = 1", "mc5": "M = 5", "mc20": "M = 20", "gated": "Uncertainty gating (0.9)",
     "experts_4": "BitNet/Q4/Q8/Q16", "experts_8_16_ptq": "BitNet/Q8/Q16/PTQ", "experts_ptq": "BitNet/PTQ",
 }
+# Reviewer experiments. Mixed-precision and parameter-matched singles run
+# under <ds>_singles_mp and <ds>_singles_pm; the extra datasets reuse the
+# single and MoE tags above with their own dataset key.
+EXTRA_DATASETS = {"esc50c": "ESC-50 (50 classes)", "ast_esc": "ESC-50, AST",
+                  "ast_esc50c": "ESC-50 (50 classes), AST", "ast_urban": "UrbanSound8K, AST"}
+CONTROLS = {"mp8_4": "mp", "pm8_moe": "pm", "pm32_moe": "pm", "pm8_st": "pm", "pm32_st": "pm"}
+CASCADES = [f"{sig}_{tgt}_{pt}" for sig in ("confidence", "mc_variance") for tgt in ("q8", "fp32")
+            for pt in ("match_moe", "max_f1")]
+LABELS.update({
+    "mp8_4": "Mixed precision, 8-bit first layer, 4-bit rest",
+    "pm8_moe": "Q8, MoE parameter count", "pm32_moe": "FP32, MoE parameter count",
+    "pm8_st": "Q8, shared-trunk parameter count", "pm32_st": "FP32, shared-trunk parameter count",
+    **{c: "Cascade Q4 to {}, {}, {}".format(
+        "Q8" if "_q8_" in c else "FP32",
+        "confidence" if c.startswith("confidence") else "MC-dropout variance",
+        "rate of the prior MoE" if c.endswith("match_moe") else "max inner-val F1") for c in CASCADES},
+})
 PREVIEW = ("q1", "q2", "q4", "q8", "q16", "fp32", "int8", "bitnet", "uniform", "pprior", "st_uniform", "st_pprior")
 
 
@@ -71,15 +94,19 @@ def arm_key(ds: str, arm: str):
         return MOE_ALL[arm].format(ds=ds), "moe"
     if ds == "esc" and arm in MOE_ESC:
         return MOE_ESC[arm], "moe"
+    if arm in CONTROLS:
+        return f"{ds}_singles_{CONTROLS[arm]}", arm
     return None
 
 
 # ── loading ────────────────────────────────────────────────────────────────
 
-def load_runs(root: Path):
-    """{(tag, kind): {"records": {(seed, fold): fold record}, "meta": {...}}}"""
+def load_runs(roots):
+    """{(tag, kind): {"records": {(seed, fold): fold record}, "meta": {...}}}
+    from one outputs directory or a list of them."""
     runs, skipped = defaultdict(lambda: {"records": {}, "meta": {}}), []
-    for path in sorted(root.glob("*/*/summary.json")):
+    roots = [roots] if isinstance(roots, Path) else roots
+    for root, path in ((root, p) for root in roots for p in sorted(root.glob("*/*/summary.json"))):
         s = json.loads(path.read_text())
         m = re.match(r"(.+)_s(\d+)$", path.parent.parent.name)
         if s.get("protocol_version") != PROTOCOL_VERSION or not m:
@@ -94,7 +121,7 @@ def load_runs(root: Path):
                 raise ValueError(f"{path}: seed {key[0]} fold {key[1]} appears in two summaries")
             run["records"][key] = f
         run["meta"].update({k: s.get(k) for k in ("parameter_count", "model_size_bytes", "fold_scheme",
-                                                   "train_recipe", "primary_metric")})
+                                                   "train_recipe", "primary_metric", "param_match")})
         run["meta"].setdefault("run_dirs", []).append(str(path.parent))
     return runs, skipped
 
@@ -192,26 +219,253 @@ def write_table(tex_dir: Path, name: str, header: list, rows: list, colspec: str
     (tex_dir / f"{name}.tex").write_text("\n".join(lines))
 
 
-# ── main ───────────────────────────────────────────────────────────────────
+def efficiency_rows(paths, names: dict):
+    """Table rows, latency tests (Mann-Whitney U and Levene against FP32 and
+    int8) and per-dataset report from efficiency benchmark JSONs."""
+    eff_rows, lat_tests, eff_report = [], [], {}
+    for path in paths:
+        e = json.loads(path.read_text())
+        ds = path.stem
+        eff_report[ds] = {"machine": e["machine"], "protocol": e["protocol"], "arms": {}}
+        for arm, a in e["arms"].items():
+            en = a.get("energy", {})
+            eff_report[ds]["arms"][arm] = {k: v for k, v in a.items() if k != "latency_raw_ms"}
+            lat = a["latency"]
+            eff_rows.append([tex_escape(names.get(ds, ds)), tex_escape(LABELS.get(arm, arm)) + ("$^*$" if a["simulated_quantization"] else ""),
+                             num(a["storage_bytes"] / 1e3, "{:,.1f}"),
+                             f"{lat['median_ms']:.3f} [{lat['q1_ms']:.3f}, {lat['q3_ms']:.3f}]",
+                             num(a.get("router_share_of_median"), "{:.0%}").replace("%", "\\%"),
+                             num(en.get("energy_mj_per_inference")), num(en.get("co2_ug_per_inference"))])
+        raw = {arm: a["latency_raw_ms"] for arm, a in e["arms"].items()}
+        for arm in raw:
+            for ref in ("fp32", "int8"):
+                if arm != ref and ref in raw and not (arm == "fp32" and ref == "int8"):
+                    mw = stats.mannwhitneyu(raw[arm], raw[ref], alternative="two-sided")
+                    lev = levene_test(raw[arm], raw[ref])
+                    lat_tests.append({"comparison": f"{names.get(ds, ds)}: {LABELS.get(arm, arm)} vs {LABELS[ref]}",
+                                      "result": {"p": float(mw.pvalue), "U": float(mw.statistic),
+                                                 "median_diff_ms": float(np.median(raw[arm]) - np.median(raw[ref])),
+                                                 "levene_p": lev["p"], "var_ratio": lev["var_ratio"]}})
+        first = next(iter(e["arms"].values()), {})
+        if "energy" in first:
+            eff_report[ds]["energy_measurement"] = {k: first["energy"][k] for k in
+                                                    ("cpu_model", "cpu_power_w", "ram_power_w", "tracking_mode",
+                                                     "cpu_measurement_mode", "country_iso_code")}
+    return eff_rows, lat_tests, eff_report
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--outputs", default="outputs")
-    ap.add_argument("--json", default=None, help="default: <outputs>/paper_numbers.json (gitignored)")
-    ap.add_argument("--tex-dir", default=None, help="default: <outputs>/paper_tables")
-    args = ap.parse_args(argv)
-    root = Path(args.outputs).resolve()
-    json_path = Path(args.json) if args.json else root / "paper_numbers.json"
-    tex_dir = Path(args.tex_dir) if args.tex_dir else root / "paper_tables"
-    tex_dir.mkdir(parents=True, exist_ok=True)
 
-    runs, skipped = load_runs(root)
+# ── reviewer experiments ───────────────────────────────────────────────────
+
+ROUTING_PAIRS = [("pprior", "uniform"), ("st_pprior", "st_uniform"), ("st_pprior", "pprior"),
+                 ("uniform", "q4"), ("pprior", "q4"), ("st_pprior", "q4")]
+TABLE_ARMS = ["fp32", "q4", "q8", "bitnet", "int8", "uniform", "pprior", "st_uniform", "st_pprior"]
+
+
+def load_cascades(roots):
+    """{(ds, variant or MoE arm): {(seed, fold): record}} and {ds: single-model costs}
+    from <outputs>/cascade/*.json (scripts/analysis/cascade.py)."""
+    recs, costs = defaultdict(dict), {}
+    for path in (p for root in roots for p in sorted((root / "cascade").glob("*_s*.json"))):
+        c = json.loads(path.read_text())
+        costs[c["dataset"]] = c["costs"]
+        for f in c["folds"]:
+            key = (int(f["seed"]), int(f["fold"]))
+            for name, rec in {**f["variants"], **f["moe_arms"]}.items():
+                if key in recs[(c["dataset"], name)]:
+                    raise ValueError(f"{path}: seed {key[0]} fold {key[1]} of {name} appears twice")
+                recs[(c["dataset"], name)][key] = rec
+    return recs, costs
+
+
+def collect_extra(runs, roots, tex_dir: Path) -> dict:
+    """Tables and test families of the reviewer experiments, reported apart
+    from the paper tables so those stay unchanged."""
+    names = {**DATASETS, **EXTRA_DATASETS}
+    out = {"arms": {}, "tables": {}, "tests": {}}
+    families = defaultdict(list)
 
     def run(ds, arm):
         k = arm_key(ds, arm)
         return runs.get(k) if k else None
 
-    report = {"source": str(root), "skipped_summaries": skipped,
+    desc = {}
+    for ds in names:
+        for arm in list(SINGLES) + list(MOE_ALL) + list(CONTROLS):
+            r = run(ds, arm)
+            if not r:
+                continue
+            d = describe(values(r))
+            d.update({"parameter_count": r["meta"].get("parameter_count"), "param_match": r["meta"].get("param_match"),
+                      "storage_bytes": r["meta"].get("model_size_bytes"), "run_dirs": r["meta"]["run_dirs"]})
+            desc[(ds, arm)] = d
+            if ds in EXTRA_DATASETS or arm in CONTROLS:
+                out["arms"][f"{ds}/{arm}"] = {**d, "per_fold": {f"{k[0]}:{k[1]}": v for k, v in values(r).items()}}
+
+    def cell(ds, arm, fmt):
+        d = desc.get((ds, arm))
+        return fmt(d) if d else "--"
+
+    def params(d):
+        return num(d["parameter_count"] / 1e6, "{:.2f}") if d["parameter_count"] else "--"
+
+    def kb(d):
+        return num(d["storage_bytes"] / 1e3, "{:,.1f}") if d.get("storage_bytes") else "--"
+
+    def add(family, ds, a, b, va=None):
+        va = values(run(ds, a)) if va is None else va
+        families[family].append({"comparison": f"{names[ds]}: {LABELS[a]} vs {LABELS[b]}",
+                                 "result": paired_test(va, values(run(ds, b)))})
+
+    # Cascades against the MoE arms, paired on (seed, fold)
+    casc, costs = load_cascades(roots)
+    blocks = []
+    for ds in names:
+        if ds not in costs:
+            continue
+        block, c = [], costs[ds]
+        for arm in ("q4", "q8", "fp32"):
+            if desc.get((ds, arm)):
+                block.append([tex_escape(names[ds]), tex_escape(LABELS[arm]), pm(desc[(ds, arm)]),
+                              "0.00" if arm == "q4" else "--", num(c[arm]["storage_bytes"] / 1e3, "{:,.1f}"),
+                              num(c[arm]["macs"] / c["q4"]["macs"], "{:.2f}"),
+                              num(c[arm]["bops"] / c["q4"]["bops"], "{:.2f}")])
+        for name in CASCADES + list(MOE_ALL):
+            recs = casc.get((ds, name))
+            if not recs:
+                continue
+            mean = {f: float(np.mean([r[f] for r in recs.values()])) for f in
+                    ("escalation_fraction", "storage_bytes", "compute_rel_q4_macs", "compute_rel_q4_bops")}
+            v = {k: r["f1_macro"] for k, r in recs.items()}
+            d = desc.get((ds, name)) if name in MOE_ALL else describe(v)
+            block.append([tex_escape(names[ds]), tex_escape(LABELS[name]), pm(d),
+                          num(mean["escalation_fraction"], "{:.2f}"), num(mean["storage_bytes"] / 1e3, "{:,.1f}"),
+                          num(mean["compute_rel_q4_macs"], "{:.2f}"), num(mean["compute_rel_q4_bops"], "{:.2f}")])
+            if name in CASCADES:
+                out["arms"][f"{ds}/{name}"] = {**d, **mean, "per_fold": {f"{k[0]}:{k[1]}": x for k, x in v.items()}}
+                add("cascade_vs_moe", ds, name, "pprior", va=v)
+        blocks.append(block)
+    rows = join_blocks(blocks)
+    write_table(tex_dir, "cascade_vs_moe", ["Dataset", "Method", "Macro F1", "Escalated", "Storage (KB)",
+                                            "Compute (x Q4)", "BOPs (x Q4)"], rows, "l l c r r r r",
+                "Q4 escalating to Q8 or FP32 when unsure, thresholds chosen on each fold's inner validation split, "
+                "vs the MoE arms on the same (seed, fold). Escalated: share sent to the higher-precision model "
+                "(MoE: to its highest-precision expert). Compute: MACs per sample; BOPs: MACs x weight x activation bits.")
+    out["tables"]["cascade_vs_moe"] = rows
+
+    # Mixed precision and parameter-matched singles (EfficientNet datasets)
+    blocks = []
+    for ds in DATASETS:
+        blocks.append([[tex_escape(names[ds]), tex_escape(LABELS[arm]), params(desc[(ds, arm)]), kb(desc[(ds, arm)]),
+                        pm(desc[(ds, arm)])] for arm in ("q4", "q8", "mp8_4", "st_uniform", "st_pprior")
+                       if desc.get((ds, arm))])
+        for a, b in (("mp8_4", "q4"), ("mp8_4", "q8"), ("st_pprior", "mp8_4"), ("st_uniform", "mp8_4")):
+            add("mixed_precision", ds, a, b)
+    rows = join_blocks(blocks)
+    write_table(tex_dir, "mixed_precision", ["Dataset", "Model", "Params (M)", "Storage (KB)", "Macro F1"], rows,
+                "l l r r c", "Single model with the shared trunk's precision split (8-bit first layer, 4-bit rest).")
+    out["tables"]["mixed_precision"] = rows
+
+    blocks = []
+    for ds in DATASETS:
+        block = []
+        for arm in ("uniform", "pprior", "pm8_moe", "pm32_moe", "st_uniform", "st_pprior", "pm8_st", "pm32_st"):
+            d = desc.get((ds, arm))
+            if not d:
+                continue
+            m = d.get("param_match") or {}
+            block.append([tex_escape(names[ds]), tex_escape(LABELS[arm]), f"{d['parameter_count']:,}",
+                          f"{m['reference_parameter_count']:,}" if m else "--",
+                          "/".join(map(str, m["hidden_sizes"])) if m else "--", kb(d), pm(d)])
+        blocks.append(block)
+        for a, b in (("pprior", "pm8_moe"), ("pprior", "pm32_moe"), ("uniform", "pm8_moe"), ("uniform", "pm32_moe"),
+                     ("st_pprior", "pm8_st"), ("st_pprior", "pm32_st"), ("st_uniform", "pm8_st"), ("st_uniform", "pm32_st")):
+            add("param_matched", ds, a, b)
+    rows = join_blocks(blocks)
+    write_table(tex_dir, "param_matched", ["Dataset", "Model", "Parameters", "Target", "Hidden", "Storage (KB)",
+                                           "Macro F1"], rows, "l l r r r r c",
+                "Single models widened to the parameter count of the full-expert MoE or the shared-trunk MoE.")
+    out["tables"]["param_matched"] = rows
+
+    # ESC-50 at 50 classes, next to the 5 super-categories
+    rows = [[tex_escape(LABELS[arm]), cell("esc50c", arm, params), cell("esc50c", arm, kb), cell("esc50c", arm, pm),
+             cell("esc", arm, pm)] for arm in TABLE_ARMS if desc.get(("esc50c", arm))]
+    write_table(tex_dir, "esc50_fine", ["Model", "Params (M)", "Storage (KB)", "Macro F1, 50 classes",
+                                        "Macro F1, 5 classes"], rows, "l r r c c",
+                "ESC-50 on its 50 fine classes (label column), official folds; 5-class column from the main runs.")
+    out["tables"]["esc50_fine"] = rows
+    for a, b in ROUTING_PAIRS:
+        add("esc50_fine", "esc50c", a, b)
+
+    # AST backbone next to EfficientNet, same arms, folds and seeds
+    pairs = [("esc", "ast_esc"), ("esc50c", "ast_esc50c"), ("urban", "ast_urban")]
+    rows = [[tex_escape(LABELS[arm])] + [cell(ds, arm, pm) for p in pairs for ds in p]
+            for arm in TABLE_ARMS if any(desc.get((ds, arm)) for _, ds in pairs)]
+    write_table(tex_dir, "backbone_ast", ["Model"] + [f"{tex_escape(names[e])}, {b}" for e, _ in pairs
+                                                      for b in ("EfficientNet", "AST")], rows, "l c c c c c c",
+                "Macro F1 with EfficientNet-B3 (1536-d) and AST (768-d) embeddings of the same clips.")
+    out["tables"]["backbone_ast"] = rows
+    for _, ds in pairs:
+        for a, b in ROUTING_PAIRS:
+            add("ast_backbone", ds, a, b)
+
+    variance = []
+    for ds in EXTRA_DATASETS:
+        base = values(run(ds, "uniform"))
+        for arm in ("pprior", "st_uniform", "st_pprior", "q4"):
+            variance.append({"comparison": f"{names[ds]}: {LABELS[arm]} vs uniform",
+                             "result": levene_test(values(run(ds, arm)).values(), base.values())})
+    families["variance_levene_extra"] = variance
+
+    paths = [p for root in roots for p in sorted((root / "efficiency_extra").glob("*.json"))]
+    eff_rows, lat_tests, out["efficiency"] = efficiency_rows(paths, names)
+    families["latency_extra"] = lat_tests
+    write_table(tex_dir, "efficiency_extra", ["Dataset", "Model", "Storage (KB)", "Latency, ms (median [IQR])",
+                                              "Router share", "Energy (mJ/inf.)", "CO$_2$ ($\\mu$g/inf.)"], eff_rows,
+                "l l r c r r r", "Batch-1 latency of the new single models and the AST arms, measured as in the "
+                "efficiency table; *fake-quantized layers (fp32 arithmetic).")
+    out["tables"]["efficiency_extra"] = eff_rows
+
+    rows = []
+    for fam, tests in families.items():
+        unpaired = fam in ("variance_levene_extra", "latency_extra")
+        m = bonferroni(tests, "p" if unpaired else "p_ttest")
+        out["tests"][fam] = {"family_size": m, "tests": tests}
+        print(f"family {fam}: Bonferroni over m = {m} tests")
+        for t in (t for t in tests if t["result"] is not None):
+            r = t["result"]
+            rows.append([tex_escape(fam), tex_escape(t["comparison"])]
+                        + (["--", pval(r.get("p")), pval(r.get("p_bonferroni")), "--"] if unpaired else
+                           [num(r["mean_diff"], "{:+.3f}"), pval(r["p_ttest"]), pval(r.get("p_bonferroni")),
+                            pval(r["p_wilcoxon"])]) + [str(m)])
+    write_table(tex_dir, "significance_extra", ["Family", "Comparison", "$\\Delta$F1", "p", "$p_{adj}$",
+                                                "p (Wilcoxon)", "m"], rows, "l l r r r r r",
+                "Reviewer experiments: two-sided tests paired on (seed, fold) for F1, Levene for variance, "
+                "Mann-Whitney U for latency; Bonferroni within each family of size m.")
+    return out
+
+
+# ── main ───────────────────────────────────────────────────────────────────
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--outputs", nargs="+", default=["outputs"],
+                    help="one or more outputs directories; the first holds the main efficiency results")
+    ap.add_argument("--json", default=None, help="default: <outputs>/paper_numbers.json (gitignored)")
+    ap.add_argument("--tex-dir", default=None, help="default: <outputs>/paper_tables")
+    args = ap.parse_args(argv)
+    roots = list(dict.fromkeys(Path(p).resolve() for p in args.outputs))
+    root = roots[0]
+    json_path = Path(args.json) if args.json else root / "paper_numbers.json"
+    tex_dir = Path(args.tex_dir) if args.tex_dir else root / "paper_tables"
+    tex_dir.mkdir(parents=True, exist_ok=True)
+
+    runs, skipped = load_runs(roots)
+
+    def run(ds, arm):
+        k = arm_key(ds, arm)
+        return runs.get(k) if k else None
+
+    report = {"source": str(root) if len(roots) == 1 else [str(r) for r in roots], "skipped_summaries": skipped,
               "statistics": {"score": "macro F1 on held-out test folds",
                              "spread": "sample std (ddof=1) over all (seed, fold) values of an arm",
                              "paired": "two-sided paired t-test on (seed, fold) pairs, Wilcoxon signed-rank as check",
@@ -406,35 +660,7 @@ def main(argv=None):
     report["tables"]["model_size"] = rows
 
     # Efficiency (latency and energy), from the efficiency benchmark
-    eff_rows, lat_tests, eff_report = [], [], {}
-    for path in sorted((root / "efficiency").glob("*.json")):
-        e = json.loads(path.read_text())
-        ds = path.stem
-        eff_report[ds] = {"machine": e["machine"], "protocol": e["protocol"], "arms": {}}
-        for arm, a in e["arms"].items():
-            en = a.get("energy", {})
-            eff_report[ds]["arms"][arm] = {k: v for k, v in a.items() if k != "latency_raw_ms"}
-            lat = a["latency"]
-            eff_rows.append([tex_escape(DATASETS.get(ds, ds)), tex_escape(LABELS.get(arm, arm)) + ("$^*$" if a["simulated_quantization"] else ""),
-                             num(a["storage_bytes"] / 1e3, "{:,.1f}"),
-                             f"{lat['median_ms']:.3f} [{lat['q1_ms']:.3f}, {lat['q3_ms']:.3f}]",
-                             num(a.get("router_share_of_median"), "{:.0%}").replace("%", "\\%"),
-                             num(en.get("energy_mj_per_inference")), num(en.get("co2_ug_per_inference"))])
-        raw = {arm: a["latency_raw_ms"] for arm, a in e["arms"].items()}
-        for arm in raw:
-            for ref in ("fp32", "int8"):
-                if arm != ref and ref in raw and not (arm == "fp32" and ref == "int8"):
-                    mw = stats.mannwhitneyu(raw[arm], raw[ref], alternative="two-sided")
-                    lev = levene_test(raw[arm], raw[ref])
-                    lat_tests.append({"comparison": f"{DATASETS.get(ds, ds)}: {LABELS.get(arm, arm)} vs {LABELS[ref]}",
-                                      "result": {"p": float(mw.pvalue), "U": float(mw.statistic),
-                                                 "median_diff_ms": float(np.median(raw[arm]) - np.median(raw[ref])),
-                                                 "levene_p": lev["p"], "var_ratio": lev["var_ratio"]}})
-        first = next(iter(e["arms"].values()), {})
-        if "energy" in first:
-            eff_report[ds]["energy_measurement"] = {k: first["energy"][k] for k in
-                                                    ("cpu_model", "cpu_power_w", "ram_power_w", "tracking_mode",
-                                                     "cpu_measurement_mode", "country_iso_code")}
+    eff_rows, lat_tests, eff_report = efficiency_rows(sorted((root / "efficiency").glob("*.json")), DATASETS)
     m = bonferroni(lat_tests, "p")
     report["tests"]["latency"] = {"family_size": m, "tests": lat_tests}
     print(f"family latency: Bonferroni over m = {m} tests")
@@ -462,6 +688,8 @@ def main(argv=None):
     write_table(tex_dir, "significance", ["Family", "Comparison", "$\\Delta$F1", "p", "$p_{adj}$", "p (Wilcoxon)", "m"],
                 rows, "l l r r r r r", "Two-sided tests; paired on (seed, fold) for F1, Levene for variance, "
                 "Mann-Whitney U for latency; Bonferroni within each family of size m.")
+
+    report["extra"] = collect_extra(runs, roots, tex_dir)
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, indent=2, default=str))

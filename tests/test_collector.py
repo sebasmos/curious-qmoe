@@ -149,3 +149,52 @@ def test_latency_family_and_latex(outputs):
                  "model_size", "routing_fractions"):
         assert (root / "paper_tables" / f"{name}.tex").exists(), name
     assert (root / "paper_numbers.json").exists()
+
+
+# ── reviewer experiments ───────────────────────────────────────────────────
+
+def write_extra(root, rng):
+    """Mixed-precision, parameter-matched, 50-class and AST runs plus
+    cascade results, in a second outputs directory."""
+    for ds in ("esc", "quinn", "urban"):
+        for arm in ("mp8_4", "pm8_moe", "pm8_st"):
+            tag, kind = col.arm_key(ds, arm)
+            for seed in SEEDS:
+                write_summary(root, tag, kind, seed, 0.84 + rng.normal(0, 0.01, len(FOLDS)))
+    for ds in col.EXTRA_DATASETS:
+        for arm in ("q4", "uniform", "pprior", "st_uniform", "st_pprior"):
+            tag, kind = col.arm_key(ds, arm)
+            for seed in SEEDS:
+                write_summary(root, tag, kind, seed, 0.7 + rng.normal(0, 0.02, len(FOLDS)))
+    (root / "cascade").mkdir()
+    for seed in SEEDS:
+        folds = [{"seed": seed, "fold": f, "moe_arms": {},
+                  "variants": {c: {"f1_macro": 0.86 + rng.normal(0, 0.01), "escalation_fraction": 0.2,
+                                   "storage_bytes": 3e5, "compute_rel_q4_macs": 1.2, "compute_rel_q4_bops": 1.3}
+                               for c in col.CASCADES}} for f in FOLDS]
+        costs = {k: {"macs": 1.0, "bops": b, "storage_bytes": 1e5} for k, b in (("q4", 1.0), ("q8", 2.0), ("fp32", 8.0))}
+        (root / "cascade" / f"esc_s{seed}.json").write_text(json.dumps(
+            {"dataset": "esc", "seed": seed, "costs": costs, "folds": folds}))
+
+
+def test_extra_runs_leave_the_paper_tables_unchanged(outputs):
+    root, report, _, _ = outputs
+    write_extra(root / "second", np.random.default_rng(1))
+    report2 = col.main(["--outputs", str(root), str(root / "second"), "--tex-dir", str(root / "tables2"),
+                        "--json", str(root / "second.json")])
+    extra_tables = ("cascade_vs_moe", "mixed_precision", "param_matched", "esc50_fine", "backbone_ast",
+                    "efficiency_extra", "significance_extra")
+    paper = [t for t in (root / "paper_tables").glob("*.tex") if t.stem not in extra_tables]
+    assert len(paper) == 13
+    for tex in paper:
+        assert tex.read_text() == (root / "tables2" / tex.name).read_text(), tex.name
+    for key in ("arms", "tables", "tests", "efficiency"):
+        assert json.dumps(report[key], default=str) == json.dumps(report2[key], default=str), key
+    for name in extra_tables:
+        assert (root / "tables2" / f"{name}.tex").exists(), name
+    extra = report2["extra"]["tests"]
+    assert extra["cascade_vs_moe"]["family_size"] == 8, "8 cascades vs the prior MoE, ESC-50 only"
+    t = extra["cascade_vs_moe"]["tests"][0]["result"]
+    assert t["n_pairs"] == 15 and t["p_bonferroni"] == pytest.approx(min(1.0, t["p_ttest"] * 8))
+    assert extra["mixed_precision"]["family_size"] == 9, "3 x 3 datasets; mp8_4 vs Q8 has no Q8 runs here"
+    assert extra["esc50_fine"]["family_size"] == 6 and extra["ast_backbone"]["family_size"] == 18
