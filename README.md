@@ -78,9 +78,16 @@ Every number in the paper regenerates from this repository. Setup, the full run
 matrix, and the claim-to-command map are in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ```bash
-bash scripts/reproduce_paper.sh          # every run behind the tables
-python scripts/collect_paper_numbers.py  # tables and significance tests
+export ESC_CSV=... QUINN_CSV=... URBAN_CSV=...                    # embedding CSVs
+bash scripts/reproduce_paper.sh --list > jobs.txt                 # every training run, over seeds
+tr '\n' '\0' < jobs.txt | xargs -0 -P 5 -n 1 sh -c                # run them, 5 at a time
+bash scripts/reproduce_paper.sh --analysis                        # latency, energy, routing; run alone
+python scripts/collect_paper_numbers.py                           # tables and significance tests
 ```
+
+The code behind arXiv v4 is tagged `arxiv-v4`. The protocol has changed since
+(predefined folds, model selection on an inner validation split, seeds, macro
+F1); CONTRIBUTING describes it.
 
 ## Citing
 
