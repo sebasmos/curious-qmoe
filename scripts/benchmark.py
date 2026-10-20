@@ -5,7 +5,7 @@
 Train **single-network** versions of:
   1. BitNet        (ternary)        – key: "bitnet"
   2. BitNet-158B   (ternary v2)     – key: "bitnet158b"
-  3. ESCModel      (full-precision) – key: "esc"
+  3. FP32 BitNetExpert (pre-LN, same architecture as k-bit) – key: "esc"
 
 Optional extras: numeric quantisations **1,2,4,8,16** (k-bit) are supported
 with keys "1", "2", … "16".
@@ -93,11 +93,10 @@ os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 # ─── QWave ------------------------------------------------------------------
 from QWave.datasets import EmbeddingAdaptDataset, make_outer_folds, inner_split
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
-from QWave.models import ESCModel
 from QWave.memory import print_size_of_model, _load_cc_csv
 from QWave.utils import get_device, get_num_parameters, set_seed
 from QWave.train_utils import train_pytorch_local, _validate_single_epoch
-from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b
+from QWave.qmoe_layers import BitNetExpert, BitNetExpert158b, ptq_dynamic_int8
 from QWave.moe import train_moe_local, _validate_moe_epoch, qMoEModelBatched
 # ─── Model factory ──────────────────────────────────────────────────────────
 
@@ -126,21 +125,16 @@ def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
             hidden_sizes=cfg.experiment.model.hidden_sizes,
             dropout_prob=cfg.experiment.model.dropout_prob,
         )
-    if model_kind == "esc":
-        return ESCModel(
+    if model_kind in ("esc", "qesc"):
+        # FP32 baseline on the same pre-LayerNorm architecture as the k-bit
+        # models; "qesc" is the same network, dynamically int8-quantized after
+        # training (ptq_dynamic_int8) before the test pass.
+        return BitNetExpert(
             in_dim, n_cls,
             hidden_sizes=cfg.experiment.model.hidden_sizes,
             dropout_prob=cfg.experiment.model.dropout_prob,
+            num_bits=32,
         )
-    if model_kind == "qesc":
-        print("Quantized ESCModel selected.")
-        model = ESCModel(
-            in_dim, n_cls,
-            hidden_sizes=cfg.experiment.model.hidden_sizes,
-            dropout_prob=cfg.experiment.model.dropout_prob,
-        ) 
-        torch.backends.quantized.engine = 'qnnpack'
-        return model 
     if model_kind.isdigit() and int(model_kind) in {1,2,4,8,16}:
         return BitNetExpert(
             in_dim, n_cls,
@@ -395,13 +389,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                     # Check if expert i should be quantized based on its position in the list
                     # This assumes expert_quantizations is a list corresponding to expert indices
                     if i < len(expert_quantizations) and "qesc" in expert_quantizations[i]:
-                        if isinstance(exp, ESCModel):
-                            final_model.experts[i] = torch.quantization.quantize_dynamic(
-                                exp.cpu(), {nn.Linear}, dtype=torch.qint8
-                            )
-                            final_model.experts[i].to(device) # Move quantized expert back to device
-                        else:
-                            warnings.warn(f"Expert at index {i} is not an ESCModel, skipping qesc quantization.")
+                        final_model.experts[i] = ptq_dynamic_int8(exp)
                     
                 final_model.eval()
                 for param in final_model.parameters():
@@ -416,7 +404,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 else:
                     torch.backends.quantized.engine = 'fbgemm'
                 print(torch.backends.quantized.engine)
-                qmodel = torch.quantization.quantize_dynamic(final_model, {nn.Linear}, dtype=torch.qint8)
+                qmodel = ptq_dynamic_int8(final_model)
                 val_start_time = time.perf_counter()
                 mem_val_usage, (_, _, y_true, y_pred, y_prob) = memory_usage(
                     (_validate_single_epoch, (qmodel, te_ld, nn.CrossEntropyLoss(), device)),

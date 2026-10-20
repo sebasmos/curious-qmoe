@@ -151,43 +151,96 @@ class BitNetExpert158b(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+# Clipping ratios (fraction of each row's max |w|) searched by the k-bit
+# weight quantizer, per output channel.
+KBIT_CLIP_RATIOS = torch.linspace(0.3, 1.0, 8)
+
+
+def quantize_weight_kbit(w: torch.Tensor, num_bits: int) -> torch.Tensor:
+    """Per-output-channel symmetric k-bit weight quantization, no gradient.
+
+    k >= 2: integer levels -qmax..qmax with qmax = 2^(k-1) - 1, so all 2^k - 1
+    levels are reachable; each row's step is ratio * max|w_row| / qmax, with
+    ratio picked from KBIT_CLIP_RATIOS to minimize that row's squared error.
+    k = 1: sign(w) times the row's mean |w|, the MSE-optimal binary scale.
+    """
+    with torch.no_grad():
+        if num_bits == 1:
+            return torch.where(w >= 0, 1.0, -1.0) * w.abs().mean(dim=1, keepdim=True)
+        qmax = 2 ** (num_bits - 1) - 1
+        row_max = w.abs().amax(dim=1, keepdim=True).clamp(min=1e-8)
+        z = w / row_max  # rows scaled to [-1, 1]; the error ranking per row is unchanged
+        best_err = best_ratio = None
+        buf = torch.empty_like(z)
+        for ratio in KBIT_CLIP_RATIOS.tolist():
+            torch.mul(z, qmax / ratio, out=buf)
+            buf.round_().clamp_(-qmax, qmax).mul_(ratio / qmax).sub_(z)
+            err = buf.pow_(2).sum(dim=1, keepdim=True)
+            if best_err is None:
+                best_err, best_ratio = err, torch.full_like(err, ratio)
+            else:
+                better = err < best_err
+                best_err = torch.where(better, err, best_err)
+                best_ratio = torch.where(better, torch.full_like(err, ratio), best_ratio)
+        step = row_max * best_ratio / qmax
+        return (w / step).round().clamp(-qmax, qmax) * step
+
+
 class BitLinear(nn.Module):
+    """Linear layer with pre-LayerNorm and simulated (fake) weight quantization.
+
+    num_bits: "bitnet" (ternary weights and activations), an int k < 16
+    (k-bit weights, 8-bit activations), 16 (fp16-rounded weights) or 32 (plain
+    fp32). Every variant keeps the same pre-LN architecture, so bit-width is
+    the only difference between them; quantized weights use a straight-through
+    estimator. All arithmetic runs in fp32, so k-bit latency is not a
+    hardware measurement.
+    """
     def __init__(self, in_features, out_features, num_bits="bitnet", bias=True, pre_ln=True):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.num_bits = num_bits  # "bitnet" or int in {1,2,4,8,16,...}
+        self.num_bits = num_bits  # "bitnet" or int in {1,2,4,8,16,32}
         self.pre_ln = pre_ln
 
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         nn.init.xavier_uniform_(self.weight)
         self.bias = nn.Parameter(torch.zeros(out_features)) if bias else None
         self.act_ln = nn.LayerNorm(in_features) if pre_ln else nn.Identity()
+        self._wq_key, self._wq = None, None
 
     def forward(self, x):
         if self.num_bits == "bitnet":
             return self.forward_bitnet(x)
-        elif isinstance(self.num_bits, int) and self.num_bits >= 16:
+        elif isinstance(self.num_bits, int) and self.num_bits >= 32:
             return F.linear(self.act_ln(x), self.weight, self.bias)
+        elif isinstance(self.num_bits, int) and self.num_bits == 16:
+            # fp16-rounded weights with STE; activations stay fp32
+            w16 = self.weight.detach().half().float()
+            Wf = self.weight + (w16 - self.weight).detach()
+            return F.linear(self.act_ln(x), Wf, self.bias)
         else:
             return self.forward_kbit(x)
 
+    def _quantized_weight(self):
+        # The grid search runs once per weight update: cached on the
+        # parameter's version counter, which every optimizer step and
+        # load_state_dict bump.
+        key = (self.weight._version, self.weight.data_ptr(), self.num_bits)
+        if self._wq_key != key:
+            self._wq = quantize_weight_kbit(self.weight.detach(), self.num_bits)
+            self._wq_key = key
+        return self._wq
+
     def forward_kbit(self, x):
-        # Activation quant (absmax) with STE
+        # Activation quant (absmax, 8-bit) with STE
         x = self.act_ln(x)
         x_scale = 127.0 / x.abs().amax(dim=-1, keepdim=True).clamp(min=1e-5)
         xq = (x * x_scale).round().clamp(-128, 127) / x_scale
         xa = x + (xq - x).detach()
 
-        # Weight quant (symmetric, per-layer) with STE
-        Wc = self.weight - self.weight.mean()
-        if self.num_bits == 1:
-            wq = torch.sign(Wc)
-        else:
-            qmin = -2**(self.num_bits - 1)
-            qmax =  2**(self.num_bits - 1) - 1
-            w_scale = Wc.abs().amax().clamp(min=1e-5) / qmax
-            wq = (Wc / w_scale).round().clamp(qmin, qmax) * w_scale
+        # Weight quant (symmetric, per output channel, MSE-chosen clipping) with STE
+        wq = self._quantized_weight()
         Wf = self.weight + (wq - self.weight).detach()
 
         return F.linear(xa, Wf, self.bias)
@@ -216,6 +269,34 @@ class BitLinear(nn.Module):
         Wf = W + (wq - W).detach()  # STE
 
         return F.linear(xa, Wf, self.bias)
+
+
+def ptq_dynamic_int8(model: nn.Module) -> nn.Module:
+    """Post-training dynamic int8 quantization of an FP32 network (the PTQ arm).
+
+    Each fp32 BitLinear becomes its LayerNorm followed by an nn.Linear, then
+    torch's quantize_dynamic swaps every nn.Linear (classifier included) for
+    an int8-weight Linear with a per-tensor scale and dynamically quantized
+    activations. Returns a new CPU module and leaves `model` untouched.
+    """
+    import copy
+    import platform
+    torch.backends.quantized.engine = "qnnpack" if platform.machine() in ("arm64", "aarch64") else "fbgemm"
+    qmodel = copy.deepcopy(model).cpu().eval()
+
+    def swap(parent):
+        for name, child in parent.named_children():
+            if isinstance(child, BitLinear) and isinstance(child.num_bits, int) and child.num_bits >= 32:
+                lin = nn.Linear(child.in_features, child.out_features, bias=child.bias is not None)
+                lin.weight.data.copy_(child.weight.data)
+                if child.bias is not None:
+                    lin.bias.data.copy_(child.bias.data)
+                setattr(parent, name, nn.Sequential(child.act_ln, lin))
+            else:
+                swap(child)
+
+    swap(qmodel)
+    return torch.quantization.quantize_dynamic(qmodel, {nn.Linear}, dtype=torch.qint8)
 # class BitLinear(nn.Module):
 #     """
 #     A BitLinear layer supporting both fixed bit-widths (1, 2, 4, 8, 16) and BitNet-style ternary quantization.

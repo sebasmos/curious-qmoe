@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score
 import torch.nn.functional as F
-from .models import ESCModel, reset_weights
+from .models import reset_weights
 from .qmoe_layers import BitNetExpert158b, BitNetExpert, BitNetPopcountExpert, SharedTrunkMoE
 
 
@@ -111,27 +111,20 @@ class qMoEModelBatched(nn.Module):
 
         experts = []
         for bit_width in ([] if self.shared_trunk else expert_quantizations):
-            if bit_width == "esc":
-                print("  -> Creating a ESC expert.")
+            if bit_width in ("esc", "qesc"):
+                # FP32 expert on the same pre-LN architecture as the k-bit
+                # experts; "qesc" is int8-quantized after training
+                # (ptq_dynamic_int8) before the test pass.
+                print(f"  -> Creating an FP32 expert ({bit_width}).")
                 experts.append(
-                    ESCModel(
+                    BitNetExpert(
                         in_dim,
                         num_classes,
                         hidden_sizes=cfg.experiment.model.hidden_sizes,
                         dropout_prob=cfg.experiment.model.dropout_prob,
+                        num_bits=32,
                     )
                 )
-            elif bit_width == "qesc":
-                print("  -> Creating a qESC expert.")
-                experts.append(
-                    ESCModel(
-                        in_dim,
-                        num_classes,
-                        hidden_sizes=cfg.experiment.model.hidden_sizes,
-                        dropout_prob=cfg.experiment.model.dropout_prob,
-                    )
-                )
-                torch.backends.quantized.engine = "qnnpack"
             elif bit_width == "bitnet158b":
                 print("  -> Creating a BitNet1.58b expert.")
                 experts.append(
