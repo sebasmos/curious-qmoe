@@ -74,6 +74,19 @@ class qMoEModelBatched(nn.Module):
             beta = [(b - lo) / (hi - lo) for b in bit_values]
         self.register_buffer("precision_beta", torch.tensor(beta, dtype=torch.float32))
 
+        # Running range of the router's epistemic uncertainty, BatchNorm-style.
+        # Train mode normalizes with the batch range and updates these EMA
+        # buffers (the first tracked batch initializes them); eval mode
+        # normalizes with the buffers and clamps to [0, 1], so a sample's
+        # routing does not depend on the rest of its batch and the prior still
+        # acts at batch size 1. The escalation strategy keeps a running
+        # threshold the same way. Saved in the checkpoint with the weights.
+        self.unc_momentum = 0.1
+        self.register_buffer("unc_running_min", torch.tensor(0.0))
+        self.register_buffer("unc_running_max", torch.tensor(1.0))
+        self.register_buffer("unc_running_threshold", torch.tensor(float("inf")))
+        self.register_buffer("unc_num_batches_tracked", torch.tensor(0, dtype=torch.long))
+
         # ──────────────────────────────────────────────────────────────
         # Expert initialization
         # ──────────────────────────────────────────────────────────────
@@ -291,6 +304,31 @@ class qMoEModelBatched(nn.Module):
         # Return 4-tuple (backward-compatible callers can ignore the 4th)
         return out, router_p, lb_loss, uncertainty
 
+    def _ema(self, buf, value):
+        if self.unc_num_batches_tracked == 0:
+            buf.copy_(value)
+        else:
+            buf.mul_(1.0 - self.unc_momentum).add_(self.unc_momentum * value)
+
+    def _normalized_uncertainty(self, uncertainty: torch.Tensor):
+        """Uncertainty mapped to [0, 1] as a (B, 1) column, or None when the
+        range is degenerate (then the strategies fall back to base routing).
+        Train mode: batch min-max, and the running range is updated. Eval
+        mode: the running range, clamped, independent of batch composition."""
+        if self.training:
+            u_min, u_max = uncertainty.min(), uncertainty.max()
+            if u_max - u_min < 1e-8:
+                return None
+            with torch.no_grad():
+                self._ema(self.unc_running_min, u_min.detach())
+                self._ema(self.unc_running_max, u_max.detach())
+                self.unc_num_batches_tracked += 1
+        else:
+            u_min, u_max = self.unc_running_min, self.unc_running_max
+            if u_max - u_min < 1e-8:
+                return None
+        return ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)
+
     def _apply_curiosity(self, router_logits: torch.Tensor, uncertainty: torch.Tensor) -> torch.Tensor:
         """
         Apply curiosity-driven routing modification based on epistemic uncertainty.
@@ -340,12 +378,9 @@ class qMoEModelBatched(nn.Module):
             # each expert by its own deviation from uniform, so sharpening
             # actually redistributes probability mass instead of only
             # rescaling it uniformly.
-            u_min, u_max = uncertainty.min(), uncertainty.max()
-            if u_max - u_min < 1e-8:
+            u_norm = self._normalized_uncertainty(uncertainty)  # (B, 1)
+            if u_norm is None:
                 return router_p_base
-
-            u_norm = (uncertainty - u_min) / (u_max - u_min + 1e-8)
-            u_norm = u_norm.unsqueeze(1).clamp(0, 1)  # (B, 1)
 
             # Per-expert deviation from uniform routing (signed): experts
             # already favored get pushed further up, disfavored ones further
@@ -369,12 +404,11 @@ class qMoEModelBatched(nn.Module):
             # expert i's normalized precision. High epistemic uncertainty
             # shifts routing mass toward higher-precision experts by
             # construction; confident samples keep the base routing, so easy
-            # inputs stay on the cheap low-bit experts.
-            u_min, u_max = uncertainty.min(), uncertainty.max()
-            if u_max - u_min < 1e-8:
+            # inputs stay on the cheap low-bit experts. u is normalized to
+            # [0, 1] (running range in eval mode, see _normalized_uncertainty).
+            u_norm = self._normalized_uncertainty(uncertainty)  # (B, 1)
+            if u_norm is None:
                 return router_p_base
-
-            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)  # (B, 1)
             beta = self.precision_beta.unsqueeze(0)  # (1, E)
 
             router_p = router_p_base * torch.exp(self.curiosity_alpha * u_norm * beta)
@@ -392,10 +426,9 @@ class qMoEModelBatched(nn.Module):
             sharpened = router_p_base.pow(1.0 + self.curiosity_alpha)
             sharpened = sharpened / sharpened.sum(dim=1, keepdim=True)
 
-            u_min, u_max = uncertainty.min(), uncertainty.max()
-            if u_max - u_min < 1e-8:
+            u_norm = self._normalized_uncertainty(uncertainty)
+            if u_norm is None:
                 return sharpened
-            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)
             beta = self.precision_beta.unsqueeze(0)
 
             router_p = sharpened * torch.exp(self.curiosity_alpha * u_norm * beta)
@@ -406,16 +439,23 @@ class qMoEModelBatched(nn.Module):
         # Strategy 5: Escalation (hard uncertainty guard)
         # ============================================================
         elif self.curiosity_strategy == "escalation":
-            # The top-alpha fraction of most-uncertain samples in the batch
-            # routes outright to the highest-precision expert; everything
-            # else keeps base routing. alpha in (0, 1) is the escalation
-            # quantile; alpha=0 escalates nothing (identity).
+            # Samples above the (1 - alpha) uncertainty quantile route
+            # outright to the highest-precision expert; everything else keeps
+            # base routing. alpha=0 escalates nothing (identity). Train mode
+            # takes the quantile of the batch and tracks it as a running
+            # threshold; eval mode uses the running threshold, so the
+            # decision is per sample rather than relative to the batch.
             if self.curiosity_alpha <= 0:
                 return router_p_base
-            u_min, u_max = uncertainty.min(), uncertainty.max()
-            if u_max - u_min < 1e-8:
-                return router_p_base
-            threshold = torch.quantile(uncertainty, 1.0 - min(self.curiosity_alpha, 1.0))
+            if self.training:
+                if uncertainty.max() - uncertainty.min() < 1e-8:
+                    return router_p_base
+                threshold = torch.quantile(uncertainty, 1.0 - min(self.curiosity_alpha, 1.0))
+                with torch.no_grad():
+                    self._ema(self.unc_running_threshold, threshold.detach())
+                    self.unc_num_batches_tracked += 1
+            else:
+                threshold = self.unc_running_threshold
             escalate = (uncertainty >= threshold).unsqueeze(1).float()  # (B, 1)
 
             onehot = torch.zeros_like(router_p_base)
@@ -429,10 +469,9 @@ class qMoEModelBatched(nn.Module):
         elif self.curiosity_strategy == "soft_escalation":
             # p^curious = (1 - m) · p + m · onehot(highest precision), with
             # m = clamp(alpha · u_norm, 0, 1): smooth version of escalation.
-            u_min, u_max = uncertainty.min(), uncertainty.max()
-            if u_max - u_min < 1e-8:
+            u_norm = self._normalized_uncertainty(uncertainty)
+            if u_norm is None:
                 return router_p_base
-            u_norm = ((uncertainty - u_min) / (u_max - u_min + 1e-8)).unsqueeze(1).clamp(0, 1)
             mix = (self.curiosity_alpha * u_norm).clamp(0, 1)
 
             onehot = torch.zeros_like(router_p_base)

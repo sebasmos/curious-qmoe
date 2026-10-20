@@ -332,8 +332,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
             model = build_model(str(model_kind), in_dim, num_classes, cfg).to(device)
 
             # FLOPs are traced on fixed rows rather than a loader batch, so
-            # counting does not draw from the training loader's generator
+            # counting does not draw from the training loader's generator; the
+            # state is restored afterwards because tracing runs a train-mode
+            # forward that would update the router's running uncertainty range
             bs = cfg.experiment.train.batch_size
+            pre_flops_state = {k: v.clone() for k, v in model.state_dict().items()}
             if len(tr_ld) > 0:
                 sample_input_train = tr_ds.features[:bs].to(device)
                 flops_train_analyzer = FlopCountAnalysis(model, sample_input_train)
@@ -349,6 +352,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 all_validation_flops.append(validation_flops)
             else:
                 all_validation_flops.append(0)
+            model.load_state_dict(pre_flops_state)
 
             class_weights = torch.tensor(1/np.bincount(tr_ds.labels.numpy()), dtype=torch.float32).to(device)
 

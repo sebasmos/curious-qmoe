@@ -223,6 +223,10 @@ def test_new_strategies_route_uncertain_to_high_precision():
         cfg.experiment.router.num_experts = 3
         torch.manual_seed(8)
         model = qMoEModelBatched(cfg, in_dim=1536, num_classes=50, num_experts=3, top_k=1)
+        # eval mode normalizes with running statistics, so calibrate them with
+        # one train-mode pass over the same uncertainties, as training would
+        model.train()
+        model._apply_curiosity(logits, u)
         model.eval()
         base = F.softmax(logits, dim=1)
 
