@@ -2,8 +2,8 @@
 """Figure 2: classifier confidence of the held-out samples routed to each expert.
 
 Reads the routing_results.json written by routing_analysis.py (one file, or the
-directory holding it, per router setting; one panel each, sharing the
-confidence axis). Schema used: config.expert_names (experts in config order,
+directory holding it, per router setting; one panel each, side by side in one
+row, sharing the confidence axis). Schema used: config.expert_names (experts in config order,
 which is ascending precision in the paper runs), config.run_dir (the panel
 title takes alpha from its "_a<alpha>_" tag) and routing[*].expert /
 routing[*].confidence (the classifier's max class probability).
@@ -171,37 +171,36 @@ def draw_panel(ax, panel, rng, palette):
     ax.set_title(panel["title"], loc="left", fontsize=8, color=INK, pad=2)
     t = compare_top(panel)
     if t:
-        ax.set_title(f"{t['name']} vs others, Mann-Whitney {fmt_p(t['p'])}",
+        ax.set_title(f"{t['name']} vs others, {fmt_p(t['p'])}",
                      loc="right", fontsize=7, color=INK2, pad=2)
     return t
 
 
 def make_figure(panels, output, stamp=None, palette="figure1"):
-    """Exact 3.25 in width (half of a 6.5 in text width), so the point sizes
-    set here are the printed sizes."""
+    """Panels side by side in one row at an exact 6.5 in width (the full text
+    width), so the point sizes set here are the printed sizes."""
     lo = min(min((v.min() for v in p["conf"] if len(v)), default=1.0) for p in panels)
     xmin = min(0.2, np.floor(lo * 10) / 10)
     rng = np.random.default_rng(0)
-    W, ROW, LEFT, RIGHT, TITLE, GAP, BOTTOM = 3.25, 0.34, 0.80, 0.09, 0.17, 0.12, 0.36
+    W, ROW, LEFT, RIGHT, TITLE, GAP, BOTTOM = 6.5, 0.40, 0.80, 0.09, 0.17, 0.20, 0.36
     TOP = 0.03 + (0.15 if stamp else 0)
-    heights = [ROW * len(p["names"]) for p in panels]
-    H = TOP + sum(heights) + TITLE * len(panels) + GAP * (len(panels) - 1) + BOTTOM
+    n = len(panels)
+    h = ROW * max(len(p["names"]) for p in panels)
+    w = (W - n * LEFT - RIGHT - GAP * (n - 1)) / n
+    H = TOP + TITLE + h + BOTTOM
     with plt.rc_context(RC):
         fig = plt.figure(figsize=(W, H))
-        axes, y = [], H - TOP
-        for h in heights:
-            y -= TITLE + h
-            axes.append(fig.add_axes([LEFT / W, y / H, (W - LEFT - RIGHT) / W, h / H],
+        axes = []
+        for i in range(n):
+            x = LEFT + i * (LEFT + w + GAP)
+            axes.append(fig.add_axes([x / W, BOTTOM / H, w / W, h / H],
                                      sharex=axes[0] if axes else None))
-            y -= GAP
         tests = [draw_panel(ax, p, rng, palette) for ax, p in zip(axes, panels)]
-        for ax in axes[:-1]:
-            ax.tick_params(axis="x", labelbottom=False, length=0)
-        ax = axes[-1]
-        ax.set_xlim(xmin - 0.01, 1.01)
-        ax.set_xticks(np.round(np.arange(np.ceil(xmin * 5) / 5, 1.0001, 0.2), 1))
-        ax.set_xlabel("Classifier confidence (max class probability)",
-                      fontsize=7.5, color=INK, labelpad=3)
+        axes[0].set_xlim(xmin - 0.01, 1.01)
+        axes[0].set_xticks(np.round(np.arange(np.ceil(xmin * 5) / 5, 1.0001, 0.2), 1))
+        for ax in axes:
+            ax.set_xlabel("Classifier confidence (max class probability)",
+                          fontsize=7.5, color=INK, labelpad=3)
         if stamp:
             fig.text(0.06 / W, 1 - 0.03 / H, stamp, ha="left", va="top",
                      fontsize=7, color="#b42318", style="italic")
