@@ -42,7 +42,13 @@ experiment:
 **On the ESC-50 label column.** Every result in the paper uses `class_id`, the
 five super-categories. The 50 fine-grained classes are in `label`. This is why
 our ESC-50 numbers are not comparable to published 50-class results, and the
-paper says so.
+paper says so. `experiment.datasets.esc.label_col=label` trains on the 50
+classes with the same folds; the extra job list below does that.
+
+**Second backbone.** ESC-50 and UrbanSound8K also exist as 768-dimensional AST
+embedding CSVs with the same rows, folds and labels; see
+[data/audio_embeddings](data/audio_embeddings/README.md). The input dimension
+is always read from the CSV.
 
 ## Evaluation protocol
 
@@ -91,6 +97,29 @@ tr '\n' '\0' < jobs.txt | xargs -0 -P 5 -n 1 sh -c       # 5 jobs at a time, 2 t
 bash scripts/reproduce_paper.sh --analysis                # efficiency and routing, alone
 python scripts/collect_paper_numbers.py                   # tables and tests
 ```
+
+Reviewer experiments run the same way, from their own job list (also needs
+`AST_ESC_CSV` and `AST_URBAN_CSV`):
+
+```bash
+bash scripts/reproduce_paper.sh --list-extra > jobs-extra.txt   # 217 training commands
+tr '\n' '\0' < jobs-extra.txt | xargs -0 -P 5 -n 1 sh -c
+BASE_OUTPUTS=/path/to/main/outputs bash scripts/reproduce_paper.sh --analysis-extra   # alone
+python scripts/collect_paper_numbers.py --outputs outputs /path/to/main/outputs
+```
+
+They cover a mixed-precision single model (`mp8_4`: first layer 8-bit, the
+rest 4-bit, the single-model control for the shared trunk), single Q8 and FP32
+models widened to the parameter count of the full-expert MoE and of the
+shared-trunk MoE (`pm8_moe`, `pm32_moe`, `pm8_st`, `pm32_st`, widths computed
+from the MoE count and stored as `param_match` in `summary.json`), ESC-50 at
+50 classes (`esc50c_*` tags) and the AST backbone (`ast_*` tags).
+`--analysis-extra` runs `scripts/analysis/cascade.py`, a post-hoc Q4 to Q8 or
+FP32 cascade escalating on low confidence or high MC-dropout variance, with
+thresholds chosen on each fold's inner validation split, then times the new
+single models. `BASE_OUTPUTS` points at the main matrix's outputs when the
+extra jobs ran in another checkout. The collector puts these in their own
+tables and test families; the paper tables do not change.
 
 `bash scripts/reproduce_paper.sh` with no flag runs the same jobs serially,
 then the analysis. Each run writes `outputs/<tag>_s<seed>/<model_kind>/` with

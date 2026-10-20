@@ -25,6 +25,15 @@
 # EXTRA_OVERRIDES is appended to every job (e.g. experiment.train.max_epochs=2
 # for a smoke test).
 #
+# Reviewer experiments, the same way (also needs AST_ESC_CSV and AST_URBAN_CSV,
+# the AST embeddings of ESC-50 and UrbanSound8K, see data/audio_embeddings/):
+#   bash scripts/reproduce_paper.sh --list-extra > jobs-extra.txt
+#   tr '\n' '\0' < jobs-extra.txt | xargs -0 -P 5 -n 1 sh -c
+#   BASE_OUTPUTS=/path/to/main/outputs bash scripts/reproduce_paper.sh --analysis-extra
+#   python scripts/collect_paper_numbers.py --outputs outputs /path/to/main/outputs
+# BASE_OUTPUTS is where the main matrix wrote its runs, if not ./outputs; the
+# cascade and the efficiency references read the single models from there.
+#
 # Requires the curious-qmoe conda env (torch, hydra, fvcore, codecarbon).
 # ============================================================================
 set -euo pipefail
@@ -53,7 +62,12 @@ job() {  # job <ds> <seed> <tag> <log name> <overrides...>   (prints one command
     esc)   cfgname=esc50;   csv=$ESC_CSV ;;
     quinn) cfgname=quinn;   csv=$QUINN_CSV ;;
     urban) cfgname=urban8k; csv=$URBAN_CSV ;;
+    esc50c) cfgname=esc50; csv=$ESC_CSV ;;
+    ast_esc|ast_esc50c) cfgname=esc50; csv=$AST_ESC_CSV ;;
+    ast_urban) cfgname=urban8k; csv=$AST_URBAN_CSV ;;
   esac
+  # *50c: ESC-50 on its 50 fine classes (label) instead of the 5 super-categories
+  case $ds in *50c) set -- "experiment.datasets.esc.label_col=label" "$@" ;; esac
   sq "$ROOT"; line="cd $REPLY && OMP_NUM_THREADS=$THREADS MKL_NUM_THREADS=$THREADS PYTHONPATH=$REPLY"
   sq "$PY"; line+=" $REPLY scripts/benchmark.py"
   sq "$CFG"; line+=" --config-path $REPLY --config-name $cfgname $COMMON experiment.seed=$seed"
@@ -103,6 +117,43 @@ jobs_for() {  # jobs_for <ds> <seed>
   moe esc "$s" esc_pprior_a1.0_qesc "[bitnet,qesc]" 2 $PRIOR experiment.router.curiosity_alpha=1.0
 }
 
+arms_for() {  # arms_for <ds> <seed>: the singles and four MoE arms of the extra datasets
+  local ds=$1 s=$2 k
+  local E3="[bitnet,'4','8']"
+  for k in esc 4 8 bitnet qesc; do
+    job "$ds" "$s" "${ds}_singles" "${ds}_singles_${k}" "experiment.models_to_run=['$k']"
+  done
+  moe "$ds" "$s" "${ds}_uniform_ctrl" "$E3" 3 $UNIFORM
+  moe "$ds" "$s" "${ds}_sharedtrunk_uniform_ctrl" "$E3" 3 $UNIFORM $SHARED
+  moe "$ds" "$s" "${ds}_pprior_a1.0" "$E3" 3 $PRIOR experiment.router.curiosity_alpha=1.0
+  moe "$ds" "$s" "${ds}_sharedtrunk_a1.0" "$E3" 3 $PRIOR experiment.router.curiosity_alpha=1.0 $SHARED
+}
+
+controls_for() {  # controls_for <ds> <seed>: mixed-precision and parameter-matched singles
+  local ds=$1 s=$2 k
+  local E3="[bitnet,'4','8']"
+  job "$ds" "$s" "${ds}_singles_mp" "${ds}_singles_mp" "experiment.models_to_run=['mp8_4']"
+  # widths are matched to the MoE these router settings describe
+  for k in pm8_moe pm32_moe pm8_st pm32_st; do
+    job "$ds" "$s" "${ds}_singles_pm" "${ds}_singles_pm_${k}" "experiment.models_to_run=['$k']" \
+      "experiment.router.expert_quantizations=$E3" "experiment.router.num_experts=3"
+  done
+}
+
+list_extra() {  # reviewer experiments, longest first
+  local s
+  : "${ESC_CSV:?set ESC_CSV to the ESC-50 embedding CSV}" "${QUINN_CSV:?set QUINN_CSV to the Quinn embedding CSV}"
+  : "${URBAN_CSV:?set URBAN_CSV to the UrbanSound8K embedding CSV}"
+  : "${AST_ESC_CSV:?set AST_ESC_CSV to the ESC-50 AST embedding CSV}"
+  : "${AST_URBAN_CSV:?set AST_URBAN_CSV to the UrbanSound8K AST embedding CSV}"
+  for s in $OTHER_SEEDS; do controls_for urban "$s"; done
+  for s in $OTHER_SEEDS; do arms_for ast_urban "$s"; done
+  for s in $OTHER_SEEDS; do controls_for quinn "$s"; done
+  for s in $ESC_SEEDS; do
+    controls_for esc "$s"; arms_for esc50c "$s"; arms_for ast_esc "$s"; arms_for ast_esc50c "$s"
+  done
+}
+
 list_jobs() {  # longest datasets first, so a parallel pool packs well
   local s
   : "${ESC_CSV:?set ESC_CSV to the ESC-50 embedding CSV}" "${QUINN_CSV:?set QUINN_CSV to the Quinn embedding CSV}"
@@ -138,10 +189,34 @@ analysis() {
   done
 }
 
+analysis_extra() {
+  # Run alone, after the extra training jobs: the efficiency pass times inference.
+  local O="$ROOT/outputs" B="${BASE_OUTPUTS:-$ROOT/outputs}" A ds
+  export PYTHONPATH="$ROOT" OMP_NUM_THREADS=$THREADS MKL_NUM_THREADS=$THREADS
+  cd "$ROOT"
+  echo "== confidence and uncertainty cascades from trained single models, every dataset and backbone =="
+  "$PY" scripts/analysis/cascade.py --outputs "$O" "$B" --out "$O/cascade"
+  echo "== efficiency: batch-1 latency and energy of the new single models (seed 0, fold 1) =="
+  for ds in esc quinn urban; do
+    A=(--arm "fp32=$B/${ds}_singles_s0/esc" --arm "int8=$B/${ds}_singles_s0/qesc"
+       --arm "mp8_4=$O/${ds}_singles_mp_s0/mp8_4")
+    for k in pm8_moe pm32_moe pm8_st pm32_st; do A+=(--arm "$k=$O/${ds}_singles_pm_s0/$k"); done
+    "$PY" scripts/analysis/efficiency_benchmark.py "${A[@]}" --threads $THREADS --out "$O/efficiency_extra/$ds.json"
+  done
+  for ds in ast_esc ast_urban; do
+    A=(--arm "fp32=$O/${ds}_singles_s0/esc" --arm "int8=$O/${ds}_singles_s0/qesc"
+       --arm "uniform=$O/${ds}_uniform_ctrl_s0/moe" --arm "pprior=$O/${ds}_pprior_a1.0_s0/moe"
+       --arm "st_uniform=$O/${ds}_sharedtrunk_uniform_ctrl_s0/moe" --arm "st_pprior=$O/${ds}_sharedtrunk_a1.0_s0/moe")
+    "$PY" scripts/analysis/efficiency_benchmark.py "${A[@]}" --threads $THREADS --out "$O/efficiency_extra/$ds.json"
+  done
+}
+
 mkdir -p "$LOGS"
 case "${1:-}" in
   --list) list_jobs ;;
   --analysis) analysis ;;
+  --list-extra) list_extra ;;
+  --analysis-extra) analysis_extra ;;
   "")
     list_jobs > "$LOGS/jobs.txt"
     while IFS= read -r line; do
@@ -151,5 +226,5 @@ case "${1:-}" in
     analysis
     echo; echo "All runs complete. Build the paper tables with:"
     echo "  python scripts/collect_paper_numbers.py" ;;
-  *) echo "usage: $0 [--list | --analysis]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--list | --analysis | --list-extra | --analysis-extra]" >&2; exit 2 ;;
 esac
