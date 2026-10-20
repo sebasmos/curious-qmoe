@@ -6,14 +6,15 @@
 
 **Quantized audio models are fast but erratic. This makes them predictable.**
 
-Shrink an audio classifier to 4 bits and it keeps 99.9% of its accuracy. Run it
-five times and the accuracy moves around. On an edge device that variability is
-the problem: you cannot promise a latency budget you cannot predict.
+Shrink an audio classifier to 4 bits and it keeps almost all of its accuracy.
+Run it five times and the accuracy moves around. On an edge device that
+variability is the problem: you cannot promise a latency budget you cannot
+predict.
 
 `curious-qmoe` routes each input to a quantized expert based on how uncertain
 the model is about it. Confident inputs stay on the cheap low-bit expert.
-Uncertain ones go to a higher-precision one. **Cross-fold variance drops by 68
-to 97%.**
+Uncertain ones go to a higher-precision one. The aim is lower cross-fold
+variance than uniform routing.
 
 <p align="center">
   <img src="docs/architecture.svg" width="440" alt="Uncertainty-aware routing: a shared 8-bit trunk feeds a Bayesian router whose epistemic uncertainty reweights routing toward higher-precision experts.">
@@ -35,14 +36,16 @@ model = qMoEModelBatched(cfg, in_dim=1536, num_classes=5, num_experts=3, top_k=1
 logits, routing_probs, lb_loss, uncertainty = model(torch.randn(8, 1536))
 ```
 
-## Results
+## At a glance
 
 | | |
 |---|---|
-| Stability | 68 to 97% lower cross-fold variance than uniform routing |
-| Accuracy | +1.6 F1 on ESC-50 super-categories, replicated over two runs |
-| Size | 1.82M parameters, down from 3.80M, by sharing one quantized trunk |
-| Precision | BitNet ternary, BitLinear 1 to 16 bit, post-training quantization |
+| Routing | Monte Carlo dropout uncertainty shifts routing toward higher-precision experts |
+| Size | Experts share one quantized trunk, so only their small heads are replicated |
+| Precision | BitNet ternary, BitLinear 1 to 8 bit, fp16, FP32, int8 post-training quantization |
+
+Measured results are in the paper and are rebuilt by the collector below, so
+this page does not repeat them.
 
 **The honest part:** a single 4-bit model is still faster and more accurate than
 any mixture we measured. We report that rather than bury it. Use this when
@@ -68,14 +71,15 @@ where $u$ is the sample's uncertainty and $\beta_i$ is expert $i$'s normalized
 precision. When the model is confident, $u \to 0$ and routing is unchanged.
 When it is not, mass shifts toward the experts that can afford to be right.
 
-This produces *polarization*: a trained router sends 83 to 92% of samples to one
+This produces *polarization*: a trained router sends most samples to one
 dominant expert, removing the cost-mode switching that makes mixture latency
 jump around.
 
 ## Reproducing the paper
 
-Every number in the paper regenerates from this repository. Setup, the full run
-matrix, and the claim-to-command map are in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+The run matrix and the collector below rebuild every table. Setup, the
+evaluation protocol, the full run matrix and the claim-to-command map are in
+**[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ```bash
 export ESC_CSV=... QUINN_CSV=... URBAN_CSV=...                    # embedding CSVs
@@ -84,6 +88,11 @@ tr '\n' '\0' < jobs.txt | xargs -0 -P 5 -n 1 sh -c                # run them, 5 
 bash scripts/reproduce_paper.sh --analysis                        # latency, energy, routing; run alone
 python scripts/collect_paper_numbers.py                           # tables and significance tests
 ```
+
+The experiments reviewers asked for (confidence cascades, mixed-precision and
+parameter-matched single models, ESC-50 at 50 classes, an AST backbone) run the
+same way from `--list-extra` and `--analysis-extra`. The AST embeddings come
+from [data/audio_embeddings](data/audio_embeddings/README.md).
 
 The code behind arXiv v4 is tagged `arxiv-v4`. The protocol has changed since
 (predefined folds, model selection on an inner validation split, seeds, macro

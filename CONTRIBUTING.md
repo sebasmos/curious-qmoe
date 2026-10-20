@@ -160,25 +160,29 @@ with an explicit error.
 | Precision prior, main result | `*_pprior_a1.0` tags |
 | Shared trunk, recommended | `*_sharedtrunk_a1.0` tags |
 | Prior-strength sweep | `esc_pprior_a{0.3,0.5,1.0}` |
-| Routing-strategy ablation | `curiosity_strategy=` in {`precision_prior`, `kl_divergence`, `precision_sharp`, `escalation`, `soft_escalation`} |
+| Routing-strategy ablation | `esc_<strategy>_a0.3` tags, `curiosity_strategy=` in {`kl_divergence`, `entropy_regularization`, `precision_sharp`, `escalation`, `soft_escalation`} |
 | Monte Carlo budget | `mc_samples=` in {1, 5, 10, 20} |
 | Expert-set ablation | `expert_quantizations=` variants |
 | Latency, energy and router overhead | `scripts/analysis/efficiency_benchmark.py` |
 | Routing and confidence analysis (held-out folds) | `scripts/analysis/routing_analysis.py` |
 | Figures | `scripts/analysis/generate_{architecture,confidence}_figure.py` |
+| Reviewer experiments | `--list-extra` tags (`*_singles_mp`, `*_singles_pm`, `esc50c_*`, `ast_*`) and `scripts/analysis/cascade.py` |
 
 ## Honest ablations
 
-Two efficiency ideas did not survive measurement and are reported anyway:
+Two efficiency ideas did not survive measurement under the `arxiv-v4` protocol
+and are reported anyway:
 
 - **Uncertainty gating** (`gate_threshold=0.9`) runs the Monte Carlo passes only
   on ambiguous samples to cut router overhead. It scored below the uniform
   baseline, because suppressing the uncertainty estimate removes the signal
-  exactly where the prior would act.
+  exactly where the prior would act. The current matrix re-runs it
+  (`esc_gated_a1.0`).
 - **Warm starting** (`warm_start=`) initializes each expert from a trained
   single model. A first attempt reused one fold's checkpoint for every fold,
   which leaks validation data; the corrected per-fold version is statistically
-  indistinguishable from training from scratch.
+  indistinguishable from training from scratch. It is not in the current run
+  matrix.
 
 Both are in the paper's appendix for the same reason they are here: a negative
 result that cost real compute is worth publishing.
