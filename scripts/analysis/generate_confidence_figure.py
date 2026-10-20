@@ -11,8 +11,12 @@ routing[*].confidence (the classifier's max class probability).
 Each expert row shows the density of its samples' confidence (reflected at
 1.0, cut at the observed range), the individual samples, the interquartile
 range as a bar and the median as a dot, plus n and the share of the panel's
-samples. Colors are one lavender hue, light to dark with precision, as in the
-Figure 1 expert cards. The p value is a two-sided Mann-Whitney U test of the
+samples. --palette figure1 (default) fills each density with the exact
+expert card color of Figure 1 (generate_architecture_figure.py) and draws
+the outline, samples and IQR bar in a darker step of the same hue, so those
+marks clear 3:1 on white and the three experts stay apart under red-green
+color blindness. --palette ramp uses one lavender hue, light to dark with
+precision. The p value is a two-sided Mann-Whitney U test of the
 highest-precision expert against all other samples in the panel, computed here
 from the plotted data.
 
@@ -36,12 +40,21 @@ from matplotlib.colors import to_rgb
 from matplotlib.transforms import blended_transform_factory
 from scipy import stats
 
+try:
+    from scripts.analysis.generate_architecture_figure import EXPERTS as FIG1_EXPERTS
+except ImportError:                       # run as a script from scripts/analysis
+    from generate_architecture_figure import EXPERTS as FIG1_EXPERTS
+
 logging.getLogger("fontTools").setLevel(logging.ERROR)  # font subsetting chatter
 
 INK, INK2 = "#1a1a19", "#52514e"          # primary and secondary text
 GRID, AXIS = "#e1e0d9", "#a9a89f"         # hairline grid, baseline
 LIGHT, DARK = "#b09ee3", "#6140a0"        # lavender ramp ends (OKLCH h=296)
 RAMP3 = ["#b09ee3", "#896cc9", "#6140a0"]  # validated ordinal ramp, 3 experts
+FIG1_FILL = {name: color for name, color, *_ in FIG1_EXPERTS}
+# Card hues stepped down in OKLCH lightness (0.66, 0.52, 0.66) for the marks:
+# all >= 3:1 on white, worst pair CVD dE 11.3 and normal-vision dE 18.5.
+FIG1_MARK = {"BitNet": "#9b81d2", "Q4": "#137298", "Q8": "#b9892d"}
 
 RC = {
     "font.family": "sans-serif",
@@ -65,6 +78,16 @@ def ramp(n):
         return RAMP3
     a, b = np.array(to_rgb(LIGHT)), np.array(to_rgb(DARK))
     return [tuple(a + (b - a) * t) for t in np.linspace(0, 1, max(n, 2))][:n]
+
+
+def colors(names, palette):
+    """(fill, mark) per expert. Figure 1 colors follow the expert by name."""
+    if palette == "ramp":
+        return [(tint(c, 0.35), c) for c in ramp(len(names))]
+    missing = [n for n in names if n not in FIG1_MARK]
+    if missing:
+        raise SystemExit(f"--palette figure1 has no color for {missing}; use --palette ramp")
+    return [(FIG1_FILL[n], FIG1_MARK[n]) for n in names]
 
 
 def load_routing(path):
@@ -113,11 +136,11 @@ def fmt_p(p):
     return "p < 0.001" if p < 0.001 else f"p = {p:.2g}"   # 2 s.f.: 0.046 stays 0.046
 
 
-def draw_panel(ax, panel, rng):
-    names, colors = panel["names"], ramp(len(panel["names"]))
+def draw_panel(ax, panel, rng, palette):
+    names = panel["names"]
     k = len(names)
     lab = blended_transform_factory(ax.transAxes, ax.transData)
-    for e, (name, v, c) in enumerate(zip(names, panel["conf"], colors)):
+    for e, (name, v, (fill, c)) in enumerate(zip(names, panel["conf"], colors(names, palette))):
         y = k - 1 - e                     # lowest precision on top
         share = 100 * len(v) / panel["total"] if panel["total"] else 0
         ax.text(-0.03, y + 0.05, name, transform=lab, ha="right", va="bottom",
@@ -130,7 +153,7 @@ def draw_panel(ax, panel, rng):
             grid = np.linspace(v.min(), v.max(), 256)
             dens = density(v, grid)
             top = y + 0.13 + 0.36 * dens / dens.max()
-            ax.fill_between(grid, y + 0.13, top, color=tint(c, 0.35), lw=0, zorder=1)
+            ax.fill_between(grid, y + 0.13, top, color=fill, lw=0, zorder=1)
             ax.plot(grid, top, color=c, lw=0.8, zorder=2, solid_capstyle="round")
         ax.scatter(v, y - 0.24 + rng.uniform(-0.08, 0.08, len(v)), s=1.4,
                    color=c, alpha=0.8 if len(v) <= 150 else 0.4, lw=0, zorder=2)
@@ -153,7 +176,7 @@ def draw_panel(ax, panel, rng):
     return t
 
 
-def make_figure(panels, output, stamp=None):
+def make_figure(panels, output, stamp=None, palette="figure1"):
     """Exact 3.25 in width (half of a 6.5 in text width), so the point sizes
     set here are the printed sizes."""
     lo = min(min((v.min() for v in p["conf"] if len(v)), default=1.0) for p in panels)
@@ -171,7 +194,7 @@ def make_figure(panels, output, stamp=None):
             axes.append(fig.add_axes([LEFT / W, y / H, (W - LEFT - RIGHT) / W, h / H],
                                      sharex=axes[0] if axes else None))
             y -= GAP
-        tests = [draw_panel(ax, p, rng) for ax, p in zip(axes, panels)]
+        tests = [draw_panel(ax, p, rng, palette) for ax, p in zip(axes, panels)]
         for ax in axes[:-1]:
             ax.tick_params(axis="x", labelbottom=False, length=0)
         ax = axes[-1]
@@ -193,10 +216,12 @@ def main(argv=None):
     ap.add_argument("--routing-json", nargs="+", required=True,
                     help="routing_results.json file(s) or their directories, one panel each")
     ap.add_argument("--output", required=True, help="output PDF")
+    ap.add_argument("--palette", choices=["figure1", "ramp"], default="figure1",
+                    help="Figure 1 expert card colors, or one lavender hue by precision")
     ap.add_argument("--stamp", default=None, help="optional note printed above the plot")
     args = ap.parse_args(argv)
     panels = [load_routing(p) for p in args.routing_json]
-    tests = make_figure(panels, args.output, args.stamp)
+    tests = make_figure(panels, args.output, args.stamp, args.palette)
     for p, t in zip(panels, tests):
         meds = ", ".join(f"{n} {np.median(v):.3f} (n={len(v)})" if len(v) else f"{n} - (n=0)"
                          for n, v in zip(p["names"], p["conf"]))

@@ -44,6 +44,9 @@ def test_two_panel_figure_and_computed_test(tmp_path):
     fig2.main(["--routing-json", str(a03), str(a10 / "routing_results.json"),
                "--output", str(out)])
     assert out.read_bytes()[:4] == b"%PDF"
+    fig2.main(["--routing-json", str(a03), "--output", str(tmp_path / "ramp.pdf"),
+               "--palette", "ramp"])
+    assert (tmp_path / "ramp.pdf").read_bytes()[:4] == b"%PDF"
 
     p03 = fig2.load_routing(a03)
     assert p03["title"] == "α = 0.3"
