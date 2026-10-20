@@ -15,112 +15,63 @@ def _load_cc_csv(csv_path: Path) -> dict:
     return df.iloc[-1].to_dict() if len(df) else {}
 
 
-def print_size_of_model(model, label="", debug=False):
+def storage_bits(model, breakdown=None) -> int:
+    """Bits needed to store `model` at the precision it is deployed at.
+
+    BitLinear weights: k bits each plus one fp32 scale per output row for
+    k-bit (k < 16, 1-bit included), 2-bit codes plus a per-row fp32 scale for
+    ternary BitNet, 16 bits for fp16, 32 for fp32. Dynamic int8 Linear (PTQ):
+    8 bits per weight plus an fp32 scale and zero point. Ternary BitwiseLinear
+    and popcount weights: 2 bits. Everything else (biases, LayerNorm, routers,
+    fp32 classifier heads): 32 bits per parameter. Buffers are not counted.
+    Pass a list as `breakdown` to collect (module name, type, bits) rows.
     """
-    Calculate model size accounting for quantization.
-    For quantized models, calculates theoretical size based on bit-width.
-    For full-precision models, saves and measures actual file size.
-    """
-    from QWave.bitnnet import BitLinear
-    try:
-        from QWave.qmoe_layers import BitwisePopcountLinear
-    except ImportError:
-        BitwisePopcountLinear = None
+    from QWave.qmoe_layers import BitLinear, BitwiseLinear, BitwisePopcountLinear
+    from torch.ao.nn.quantized.dynamic import Linear as DynamicInt8Linear
 
-    total_bits = 0
-    has_quantized_layers = False
-    layer_breakdown = []
-
-    for name, param in model.named_parameters():
-        # Check if this parameter belongs to a quantized layer
-        module_name = '.'.join(name.split('.')[:-1])  # Get module path without param name
-        param_name = name.split('.')[-1]  # weight, bias, etc.
-
-        # Try to get the actual module
-        module = model
-        if module_name:
-            for attr in module_name.split('.'):
-                module = getattr(module, attr, None)
-                if module is None:
-                    break
-
-        # Determine bit-width based on layer type
-        param_bits = 0
-        layer_type = "FP32"
-
-        if isinstance(module, BitLinear):
-            has_quantized_layers = True
-            if param_name == 'weight':
-                if module.num_bits == "bitnet":
-                    # Ternary: {-1, 0, 1} = 2 bits per weight
-                    # Plus alpha scale per output channel (32-bit float)
-                    num_weights = param.numel()
-                    ternary_bits = num_weights * 2  # 2 bits per ternary value
-                    alpha_bits = param.shape[0] * 32  # One alpha per output channel
-                    param_bits = ternary_bits + alpha_bits
-                    layer_type = f"BitNet(ternary)"
-                elif isinstance(module.num_bits, int):
-                    # k-bit quantization (1, 2, 4, 8, 16 bits)
-                    bits = module.num_bits
-                    # Add scale factor overhead (one 32-bit float per layer for symmetric quant)
-                    param_bits = param.numel() * bits + 32
-                    layer_type = f"BitLinear({bits}bit)"
-                else:
-                    # Fallback to float32
-                    param_bits = param.numel() * 32
-                    layer_type = "BitLinear(FP32)"
+    total = 0
+    for name, m in model.named_modules():
+        if isinstance(m, BitLinear):
+            n_w, rows, nb = m.weight.numel(), m.weight.shape[0], m.num_bits
+            if nb == "bitnet":
+                bits = 2 * n_w + 32 * rows
+            elif nb >= 32:
+                bits = 32 * n_w
+            elif nb == 16:
+                bits = 16 * n_w
             else:
-                # bias and other params remain float32
-                param_bits = param.numel() * 32
-                layer_type = f"BitLinear-{param_name}(FP32)"
-
-        elif BitwisePopcountLinear is not None and isinstance(module, BitwisePopcountLinear):
-            has_quantized_layers = True
-            if param_name == 'weight':
-                # Ternary with 2-bit encoding per value
-                param_bits = param.numel() * 2
-                layer_type = "BitwisePopcount(2bit)"
-            else:
-                param_bits = param.numel() * 32
-                layer_type = f"BitwisePopcount-{param_name}(FP32)"
-
+                bits = nb * n_w + 32 * rows
+            bits += 32 * m.bias.numel() if m.bias is not None else 0
+            kind = f"BitLinear({nb})"
+        elif isinstance(m, (BitwiseLinear, BitwisePopcountLinear)):
+            bits, kind = 2 * m.weight.numel(), type(m).__name__
+        elif isinstance(m, DynamicInt8Linear):
+            b = m.bias()
+            bits = 8 * m.weight().numel() + 64 + (32 * b.numel() if b is not None else 0)
+            kind = "DynamicInt8Linear"
         else:
-            # Full-precision parameter (float32)
-            param_bits = param.numel() * 32
-            layer_type = f"{module.__class__.__name__}(FP32)"
+            bits = 32 * sum(p.numel() for p in m.parameters(recurse=False))
+            kind = type(m).__name__
+        if bits and breakdown is not None:
+            breakdown.append((name, kind, bits))
+        total += bits
+    return total
 
-        total_bits += param_bits
-        if debug:
-            layer_breakdown.append({
-                'name': name,
-                'type': layer_type,
-                'params': param.numel(),
-                'bits': param_bits,
-                'size_kb': param_bits / 8 / 1e3
-            })
 
+def print_size_of_model(model, label="", debug=False):
+    """Model storage in bytes at its deployed precision (see storage_bits).
+
+    This used to recognize only QWave.bitnnet.BitLinear, so the models built
+    from QWave.qmoe_layers fell through to serializing fp32 weights and every
+    bit-width reported the same size."""
+    rows = [] if debug else None
+    size_bytes = storage_bits(model, rows) / 8
     if debug:
         print(f"\n=== DEBUG: Model {label} ===")
-        for info in layer_breakdown:
-            print(f"  {info['name']:40s} | {info['type']:25s} | params: {info['params']:8d} | {info['size_kb']:.3f} KB")
-        print(f"  {'TOTAL':40s} | {'':<25s} | {'':8s} | {total_bits/8/1e3:.3f} KB")
-        print("=" * 100)
-
-    if has_quantized_layers:
-        # Return theoretical quantized size
-        size_bytes = total_bits / 8
-        print(f"model: {label} \t Size (KB): {size_bytes/1e3:.3f} [quantized]")
-        return size_bytes
-    else:
-        # Fallback: serialize and measure for non-quantized models. In memory
-        # rather than a shared temp.p in the cwd, so parallel runs cannot
-        # delete each other's file between save and getsize.
-        import io
-        buf = io.BytesIO()
-        torch.save(model.state_dict(), buf)
-        size = buf.getbuffer().nbytes
-        print(f"model: {label} \t Size (KB): {size/1e3:.3f}")
-        return size
+        for name, kind, bits in rows:
+            print(f"  {name:40s} | {kind:25s} | {bits / 8 / 1e3:.3f} KB")
+    print(f"model: {label} \t Size (KB): {size_bytes/1e3:.3f}")
+    return size_bytes
     
 def get_memory_usage():
     process = psutil.Process(os.getpid())

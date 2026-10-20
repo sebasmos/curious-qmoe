@@ -420,12 +420,13 @@ def run_cv(csv_path: str, cfg: DictConfig):
                                               project_name=f"{tag}_{model_kind}_fold{fold}_val")
                 tracker_val.start()
         
-            model_size_bytes = print_size_of_model(final_model, "Original_Model")
 
 
             # PTQ single models and PTQ experts inside an MoE are int8-quantized
             # here, after training, in both the "moe" and "qmoe" paths
             eval_model = prepare_eval_model(str(model_kind), final_model, cfg)
+            # storage at deployed precision: per-layer bit-widths, PTQ applied
+            model_size_bytes = print_size_of_model(eval_model, f"{model_kind} (deployed precision)")
             for param in eval_model.parameters():
                 param.requires_grad_(False)
             is_moe = model_kind in ("moe", "qmoe")
@@ -553,6 +554,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "validation_duration_mean_seconds": float(np.mean(all_validation_durations)),
             "validation_duration_std_seconds": float(np.std(all_validation_durations)),
             "parameter_count": int(moe_parameter_count), # Parameter count (same for all folds of this MoE config)
+            "model_size_bytes": float(fold_metrics[0]["model_size_bytes"]) if fold_metrics else None,
             "training_flops_mean": float(np.mean(all_training_flops)) if all_training_flops else 0.0,
             "training_flops_std": float(np.std(all_training_flops)) if all_training_flops else 0.0,
             "validation_flops_mean": float(np.mean(all_validation_flops)) if all_validation_flops else 0.0,
