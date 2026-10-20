@@ -407,13 +407,18 @@ class SharedTrunkMoE(nn.Module):
 
 class BitNetExpert(nn.Module):
     def __init__(self, in_dim, num_classes, hidden_sizes, dropout_prob,
-                 num_bits="bitnet", pre_ln=True, bias=True):
+                 num_bits="bitnet", pre_ln=True, bias=True, layer_bits=None):
         super().__init__()
+        # layer_bits: one bit-width per hidden layer (mixed precision);
+        # None keeps every hidden layer at num_bits
+        bits = list(layer_bits) if layer_bits is not None else [num_bits] * len(hidden_sizes)
+        if len(bits) != len(hidden_sizes):
+            raise ValueError(f"layer_bits has {len(bits)} entries for {len(hidden_sizes)} hidden layers")
         layers = []
         last = in_dim
-        for h in hidden_sizes:
+        for h, b in zip(hidden_sizes, bits):
             layers += [
-                BitLinear(last, h, num_bits=num_bits, bias=bias, pre_ln=pre_ln),
+                BitLinear(last, h, num_bits=b, bias=bias, pre_ln=pre_ln),
                 nn.LayerNorm(h),
                 nn.ReLU(),
                 nn.Dropout(dropout_prob),

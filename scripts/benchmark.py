@@ -72,7 +72,7 @@ python benchmark.py \
 from __future__ import annotations
 
 from pathlib import Path
-import os, sys, json, time, warnings
+import os, sys, json, time, warnings, copy, contextlib, io
 
 import hydra
 from omegaconf import DictConfig, OmegaConf, open_dict, ListConfig
@@ -141,7 +141,64 @@ def build_model(model_kind: str, in_dim: int, n_cls: int, cfg: DictConfig):
             dropout_prob=cfg.experiment.model.dropout_prob,
             num_bits=int(model_kind),
         )
+    if model_kind == "mp8_4":
+        # Mixed precision: first hidden layer 8-bit, the rest 4-bit, fp32
+        # classifier. The single-model control for the shared trunk, which
+        # also moves the experts' first layer to 8 bits.
+        hidden = list(cfg.experiment.model.hidden_sizes)
+        return BitNetExpert(
+            in_dim, n_cls,
+            hidden_sizes=hidden,
+            dropout_prob=cfg.experiment.model.dropout_prob,
+            num_bits=4,
+            layer_bits=[8] + [4] * (len(hidden) - 1),
+        )
+    if model_kind in PARAM_MATCHED:
+        bits, shared_trunk = PARAM_MATCHED[model_kind]
+        hidden, match = param_matched_widths(cfg, in_dim, n_cls, bits, shared_trunk)
+        model = BitNetExpert(
+            in_dim, n_cls,
+            hidden_sizes=hidden,
+            dropout_prob=cfg.experiment.model.dropout_prob,
+            num_bits=bits,
+        )
+        model.param_match = match
+        return model
     raise ValueError(f"Unknown model_kind '{model_kind}'")
+
+# Parameter-matched single models: kind -> (bit-width, reference is the
+# shared-trunk MoE rather than the full-expert one). The reference MoE is
+# built from the run's router config (expert_quantizations, num_experts).
+PARAM_MATCHED = {"pm8_moe": (8, False), "pm32_moe": (32, False), "pm8_st": (8, True), "pm32_st": (32, True)}
+
+def param_matched_widths(cfg, in_dim: int, n_cls: int, num_bits, shared_trunk: bool):
+    """Hidden sizes, widened with their ratios kept, that bring a single
+    BitNetExpert closest to the reference MoE's parameter count. Both counts
+    come from get_num_parameters on models built on the meta device, so the
+    search allocates nothing and draws nothing from the RNG."""
+    base = list(cfg.experiment.model.hidden_sizes)
+    ref = copy.deepcopy(cfg)
+    ref.experiment.router.shared_trunk = shared_trunk
+    ref.experiment.router.warm_start = None
+    r = ref.experiment.router
+
+    def count(w):
+        sizes = [max(1, round(w * h / base[0])) for h in base]
+        return sizes, get_num_parameters(BitNetExpert(in_dim, n_cls, sizes, 0.0, num_bits=num_bits))
+
+    with torch.device("meta"), contextlib.redirect_stdout(io.StringIO()):
+        target = get_num_parameters(qMoEModelBatched(ref, in_dim, n_cls, r.num_experts, r.top_k))
+        lo, hi = 1, base[0]
+        while count(hi)[1] < target:
+            hi *= 2
+        while hi - lo > 1:  # count(lo) < target <= count(hi)
+            mid = (lo + hi) // 2
+            lo, hi = (lo, mid) if count(mid)[1] >= target else (mid, hi)
+        sizes, n = min(count(lo), count(hi), key=lambda c: abs(c[1] - target))
+    return sizes, {"reference": "shared_trunk" if shared_trunk else "moe",
+                   "reference_expert_quantizations": [str(q) for q in r.expert_quantizations],
+                   "reference_parameter_count": int(target), "parameter_count": int(n),
+                   "hidden_sizes": sizes, "num_bits": num_bits, "relative_gap": (n - target) / target}
 
 # ─── helpers ───────────────────────────────────────────────────────────────
 cc_metrics_to_track = [
@@ -282,6 +339,9 @@ def run_cv(csv_path: str, cfg: DictConfig):
         dummy_model_for_params = build_model(str(model_kind), in_dim, num_classes, cfg).to(device)
         moe_parameter_count = get_num_parameters(dummy_model_for_params)
         print(f"Params: {moe_parameter_count:,}")
+        param_match = getattr(dummy_model_for_params, "param_match", None)  # parameter-matched kinds only
+        if param_match:
+            print(f"Parameter-matched: {param_match}")
         del dummy_model_for_params
 
         for fold, tr_idx, te_idx in folds:
@@ -562,6 +622,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
             "metadata": dict(cfg.experiment.metadata),
             "folds": fold_metrics
         }
+        if param_match:
+            summary["param_match"] = param_match
         
         if fold_metrics and all("routing" in f for f in fold_metrics):
             summary["routing_overall_mean"] = np.mean([f["routing"]["overall"] for f in fold_metrics], axis=0).tolist()
