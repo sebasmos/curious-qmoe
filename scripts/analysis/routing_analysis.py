@@ -5,22 +5,14 @@ Routing Analysis for MoE Models
 
 Analyzes expert routing patterns and generates visualizations.
 
-Task 2.2 from CVPR 2026 rebuttal.
-
-CVPR 2026 Rebuttal Command:
-    cd scripts
-    python analysis/routing_analysis.py \
-        --csv /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv \
-        --checkpoint ../outputs/full_kl_divergence_final-0.02/moe/fold_1/best.pth \
-        --device cpu \
-        --curiosity-alpha 0.02 \
-        --mc-samples 10 \
-        --num-classes 5 \
-        --expert-names BitNet Q4 Q8
+Uses held-out samples only: each fold's test samples are routed by that
+fold's own checkpoint, with features scaled by the scaler fitted on the
+fold's fit portion, and the folds are pooled.
 
 Usage:
+    python scripts/analysis/routing_analysis.py --run-dir outputs/esc_pprior_a1.0_s0/moe \
+        --output-dir scripts/analysis/outputs-paper/routing
     python scripts/analysis/routing_analysis.py --synthetic
-    python scripts/analysis/routing_analysis.py --csv /path/to/data.csv
 """
 
 from __future__ import annotations
@@ -198,94 +190,100 @@ def build_moe(in_dim=1536, num_classes=50, device="cpu", mc_samples=10, curiosit
     return qMoEModelBatched(cfg, in_dim, num_classes, 3, 1).to(device)  # num_experts=3, top_k=1
 
 
+EXPERT_LABELS = {"bitnet": "BitNet", "esc": "FP32", "qesc": "PTQ-int8", "16": "Q16"}
+
+
+def expert_names_from_cfg(cfg) -> List[str]:
+    return [EXPERT_LABELS.get(str(q), f"Q{q}") for q in cfg.experiment.router.expert_quantizations]
+
+
+def pooled_summaries(records: List[dict], expert_names: List[str]) -> Dict[int, ExpertSummary]:
+    out = {}
+    for e in sorted({r["expert"] for r in records}):
+        items = [r for r in records if r["expert"] == e]
+        uncs = [r["uncertainty"] for r in items if r["uncertainty"] is not None]
+        out[e] = ExpertSummary(expert=e, name=expert_names[e] if e < len(expert_names) else f"E{e}",
+                               count=len(items), avg_conf=float(np.mean([r["confidence"] for r in items])),
+                               avg_unc=float(np.mean(uncs)) if uncs else None)
+    return out
+
+
 def run_analysis(args):
-    """Run routing analysis."""
-    device = torch.device(args.device)
-    
-    # Compute output directory based on curiosity_alpha if not explicitly set (matches latency_benchmark.py)
+    """Routing of held-out samples only: each fold's test samples go through
+    that fold's own checkpoint (never a model that trained on them), scaled
+    with the fold's fit-portion scaler, and the folds are pooled."""
     if args.output_dir is None:
-        output_dir = ROOT / "scripts" / "analysis" / f"outputs-{args.curiosity_alpha}" / "rebuttal_routing"
+        output_dir = ROOT / "scripts" / "analysis" / "outputs-routing"
     elif not Path(args.output_dir).is_absolute():
         output_dir = ROOT / args.output_dir
     else:
         output_dir = Path(args.output_dir)
-    
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Data
     if args.synthetic:
-        data = torch.randn(400, args.in_dim)
-        labels = torch.randint(0, args.num_classes, (400,))
+        model = build_moe(args.in_dim, args.num_classes, args.device, args.mc_samples, 1.0, "precision_prior")
+        data, labels = torch.randn(400, args.in_dim), torch.randint(0, args.num_classes, (400,))
+        routing, summaries = extract_routing(model, data, labels, args.expert_names)
+        records, names, folds = [asdict(r) for r in routing], args.expert_names, []
     else:
-        import pandas as pd
-        df = pd.read_csv(args.csv)
-        cols = [c for c in df.columns if c not in ["folder", "name", "label", "category", "class_id"]]
-        data = torch.tensor(df[cols].values, dtype=torch.float32)
-        labels = torch.tensor(df["class_id"].values) if "class_id" in df else None
+        from scripts.analysis.run_loader import list_folds, load_trained_fold
+        run_dir = Path(args.run_dir).resolve()
+        folds = args.folds or list_folds(run_dir)
+        records, names = [], None
+        for fold in folds:
+            tf = load_trained_fold(run_dir, fold, csv=args.csv, device=args.device)
+            names = args.expert_names or expert_names_from_cfg(tf.cfg)
+            torch.manual_seed(int(tf.cfg.experiment.get("seed", 0)))
+            routing, _ = extract_routing(tf.model, tf.X_test, tf.y_test, names)
+            for r in routing:
+                rec = asdict(r)
+                rec["fold"], rec["idx"] = fold, int(tf.test_idx[r.idx])
+                records.append(rec)
+        summaries = pooled_summaries(records, names)
 
-    # Model - use correct configuration matching latency_benchmark.py
-    model = build_moe(args.in_dim, args.num_classes, device, args.mc_samples, args.curiosity_alpha, getattr(args, 'strategy', 'kl_divergence'))
-    if args.checkpoint:
-        model.load_state_dict(torch.load(args.checkpoint, map_location=device))
-
-    # Extract routing
-    print("Extracting routing decisions...")
-    routing, summaries = extract_routing(model, data, labels, args.expert_names)
-
-    print(f"\nRouting summary ({len(routing)} samples):")
+    print(f"\nRouting summary ({len(records)} held-out samples, folds {folds}):")
     for exp, s in sorted(summaries.items()):
         print(f"  {s.name}: {s.count} samples, conf={s.avg_conf:.3f}")
 
-    # Visualizations
     plot_routing_distribution(summaries, output_dir / "routing_distribution.png")
     plot_confidence_by_expert(summaries, output_dir / "confidence_by_expert.png")
 
-    # Save data (same structure as latency_benchmark.py)
     results = {
         "config": {
-            "curiosity_alpha": args.curiosity_alpha,
-            "mc_samples": args.mc_samples,
-            "expert_names": args.expert_names,
-            "num_samples": len(routing),
-            "checkpoint": args.checkpoint,
+            "run_dir": None if args.synthetic else str(Path(args.run_dir).resolve()),
+            "folds": folds,
+            "expert_names": names,
+            "num_samples": len(records),
+            "samples": "held-out test folds only, each routed by its own fold's checkpoint",
         },
         # Full per-sample records: the confidence-distribution figure needs the
         # whole distribution, not a 100-sample prefix, and the file stays small.
-        "routing": [asdict(r) for r in routing],
+        "routing": records,
         "summaries": {str(k): asdict(v) for k, v in summaries.items()},
     }
-    
     with open(output_dir / "routing_results.json", "w") as f:
         json.dump(results, f, indent=2)
-
     print(f"\nResults saved to {output_dir}")
-    print(f"  - routing_results.json")
-    print(f"  - routing_distribution.png")
-    print(f"  - confidence_by_expert.png")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MoE routing analysis")
-    parser.add_argument("--synthetic", action="store_true")
-    parser.add_argument("--csv", type=str)
-    parser.add_argument("--checkpoint", type=str)
-    parser.add_argument("--output-dir", type=str, default=None,
-                        help="Output directory (default: outputs-{alpha}/rebuttal_routing)")
-    parser.add_argument("--curiosity-alpha", type=float, default=0.02,
-                        help="Curiosity strength alpha value")
-    parser.add_argument("--strategy", type=str, default="kl_divergence",
-                        help="Routing strategy applied during analysis")
+    parser = argparse.ArgumentParser(description="MoE routing analysis on held-out test folds")
+    parser.add_argument("--run-dir", type=str, help="outputs/<tag>/moe from scripts/benchmark.py")
+    parser.add_argument("--folds", type=int, nargs="+", default=None, help="default: every fold in the run")
+    parser.add_argument("--csv", type=str, default=None, help="dataset CSV, if it moved since training")
+    parser.add_argument("--synthetic", action="store_true", help="random untrained model, for smoke tests")
+    parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--in-dim", type=int, default=1536)
-    parser.add_argument("--num-classes", type=int, default=50)
+    parser.add_argument("--num-classes", type=int, default=5)
     parser.add_argument("--mc-samples", type=int, default=10)
-    parser.add_argument("--expert-names", nargs="+", default=["BitNet", "Q4", "Q8"])
+    parser.add_argument("--expert-names", nargs="+", default=None, help="default: from the run's config")
 
     args = parser.parse_args()
-    
-    if not args.synthetic and not args.csv:
-        parser.error("Provide --synthetic or --csv")
-    
+    if not args.synthetic and not args.run_dir:
+        parser.error("Provide --run-dir (or --synthetic)")
+    if args.synthetic and args.expert_names is None:
+        args.expert_names = ["BitNet", "Q4", "Q8"]
     run_analysis(args)
 
 

@@ -1,6 +1,7 @@
 """
-Analysis scripts for CVPR 2026 rebuttal experiments.
+Analysis scripts that read trained runs from scripts/benchmark.py.
 
-- latency_benchmark.py: Measure Q4-Base vs MoE latency variance (Tasks 1.1, 1.2)
-- routing_analysis.py: Expert routing visualization (Task 2.2)
+- efficiency_benchmark.py: batch-1 latency (median, IQR) and energy per inference of trained checkpoints
+- routing_analysis.py: expert routing of held-out test-fold samples
+- run_loader.py: rebuilds a trained fold (model as scored, scaled held-out rows) from its run directory
 """
