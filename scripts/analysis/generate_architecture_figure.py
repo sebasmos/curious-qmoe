@@ -38,6 +38,8 @@ plt.rcParams.update({
     # into a font table, which renderers lacking the font (GitHub) collapse
     # into solid blobs.
     "svg.fonttype": "path",
+    # Embed TrueType (Type 42) fonts in PDFs instead of Type 3.
+    "pdf.fonttype": 42,
 })
 
 
