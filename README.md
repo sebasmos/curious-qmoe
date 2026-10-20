@@ -17,7 +17,7 @@ Uncertain ones go to a higher-precision one. The aim is lower cross-fold
 variance than uniform routing.
 
 <p align="center">
-  <img src="docs/architecture.svg" width="440" alt="Uncertainty-aware routing: a shared 8-bit trunk feeds a Bayesian router whose epistemic uncertainty reweights routing toward higher-precision experts.">
+  <img src="docs/architecture.svg" width="440" alt="Uncertainty-aware routing. The audio embedding feeds a shared 8-bit trunk and, in parallel, a Bayesian router whose epistemic uncertainty shifts top-1 routing toward higher-precision expert heads.">
 </p>
 
 ```python
