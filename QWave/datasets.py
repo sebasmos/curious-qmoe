@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import Dataset
 import os
 from sklearn.preprocessing import StandardScaler, MinMaxScaler # Import these
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, train_test_split
 
 from torch.utils.data import Dataset
 
@@ -37,16 +37,48 @@ def make_outer_folds(df: pd.DataFrame, labels, cv_cfg):
     return [(k, tr, te) for k, (tr, te) in enumerate(skf.split(np.zeros(len(labels)), labels), 1)]
 
 
-def inner_split(train_idx, labels, val_ratio: float, seed: int):
-    """Stratified inner validation split carved out of the outer training folds.
+def recording_groups(names, token, sep: str = "-"):
+    """Source-recording id of every row, read from its file name: token
+    `token` of the name split on `sep`. ESC-50 `1-100038-A-14.png` gives
+    100038 with token 1 (the Freesound clip), UrbanSound8K `100032-3-0-0.png`
+    gives 100032 with token 0 (the fsID). None when token is None, for a
+    dataset with no recording id in its names (Quinn)."""
+    if token is None:
+        return None
+    names = np.asarray(names).astype(str)
+    parts = pd.Series(names).str.split(sep)
+    short = (parts.str.len() <= int(token)).to_numpy()
+    if short.any():
+        raise ValueError(f"name '{names[short][0]}' has no token {token} when split on '{sep}'")
+    return parts.str[int(token)].to_numpy()
+
+
+def inner_split(train_idx, labels, val_ratio: float, seed: int, groups=None):
+    """Inner validation split carved out of the outer training folds.
 
     Early stopping, LR scheduling and checkpoint selection use only the
     returned val_idx, so the held-out test fold is never seen before the
     single final evaluation. Returns sorted (fit_idx, val_idx).
+
+    groups=None (protocol 2): a stratified random val_ratio of the rows.
+    groups given (protocol 3): one id per row of `labels`, the source
+    recording. StratifiedGroupKFold(round(1 / val_ratio), shuffled with
+    `seed`) runs over the training rows and the validation part is the first
+    of its folds whose complement still holds every class of the training
+    rows, so no recording has rows on both sides.
     """
-    fit_idx, val_idx = train_test_split(
-        train_idx, test_size=val_ratio, stratify=np.asarray(labels)[train_idx], random_state=seed)
-    return np.sort(fit_idx), np.sort(val_idx)
+    if groups is None:
+        fit_idx, val_idx = train_test_split(
+            train_idx, test_size=val_ratio, stratify=np.asarray(labels)[train_idx], random_state=seed)
+        return np.sort(fit_idx), np.sort(val_idx)
+    train_idx = np.asarray(train_idx)
+    y, g = np.asarray(labels)[train_idx], np.asarray(groups)[train_idx]
+    classes = np.unique(y)
+    sgkf = StratifiedGroupKFold(n_splits=round(1 / val_ratio), shuffle=True, random_state=seed)
+    for fit_pos, val_pos in sgkf.split(np.zeros(len(train_idx)), y, g):
+        if np.array_equal(np.unique(y[fit_pos]), classes):
+            return np.sort(train_idx[fit_pos]), np.sort(train_idx[val_pos])
+    raise ValueError("no grouped inner split keeps every class in the fit part")
 
 class EmbeddingDataset(Dataset):
     def __init__(self, df: pd.DataFrame, shuffle=False):

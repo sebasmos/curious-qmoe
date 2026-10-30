@@ -1,0 +1,33 @@
+{
+ "dataset": "TUT Acoustic Scenes 2017",
+ "classes": [
+  "beach",
+  "bus",
+  "cafe/restaurant",
+  "car",
+  "city_center",
+  "forest_path",
+  "grocery_store",
+  "home",
+  "library",
+  "metro_station",
+  "office",
+  "park",
+  "residential_area",
+  "train",
+  "tram"
+ ],
+ "n_classes": 15,
+ "n_dev": 4680,
+ "n_eval": 1620,
+ "n_locations": 248,
+ "fold_sizes": [
+  891,
+  942,
+  942,
+  957,
+  948
+ ],
+ "per_class_per_fold_min": 0,
+ "eval_per_class_min": 108
+}

@@ -1,0 +1,220 @@
+{
+ "esc50": {
+  "pair": "mn10+astw4",
+  "gain_over_hull": 0.6397639922587461,
+  "cost": 7016089144320.0,
+  "best_single": "mn20",
+  "pool_cells": [
+   "bg__20db",
+   "bg__10db",
+   "bg__5db",
+   "bg__0db",
+   "pink__20db",
+   "pink__10db",
+   "pink__5db",
+   "pink__0db",
+   "white__20db",
+   "white__10db",
+   "white__5db",
+   "white__0db"
+  ],
+  "single_iv_acc": {
+   "mn10": 95.94713345978863,
+   "mn20": 96.66387365005511,
+   "astfp32": 96.51446276389655,
+   "astw4": 95.82334833512448,
+   "astshort": 95.51749550296871
+  },
+  "experts": [
+   "mn10",
+   "mn20",
+   "astfp32",
+   "astw4",
+   "astshort"
+  ],
+  "cost_table": {
+   "mn10": 34816359424.0,
+   "mn20": 90220559360.0,
+   "astfp32": 133651301715968.0,
+   "astw4": 6981272784896.0,
+   "astshort": 2812283506688.0
+  },
+  "best_single_by_combo": {
+   "mn10+mn20": "mn20",
+   "mn10+astfp32": "mn20",
+   "mn10+astw4": "mn20",
+   "mn10+astshort": "mn20",
+   "mn20+astfp32": "mn20",
+   "mn20+astw4": "mn20",
+   "mn20+astshort": "mn20",
+   "astfp32+astw4": "mn20",
+   "astfp32+astshort": "mn20",
+   "astw4+astshort": "mn20",
+   "mn10+mn20+astfp32": "mn20",
+   "mn10+mn20+astw4": "mn20",
+   "mn10+mn20+astshort": "mn20",
+   "mn10+astfp32+astw4": "mn20",
+   "mn10+astfp32+astshort": "mn20",
+   "mn10+astw4+astshort": "mn20",
+   "mn20+astfp32+astw4": "mn20",
+   "mn20+astfp32+astshort": "mn20",
+   "mn20+astw4+astshort": "mn20",
+   "astfp32+astw4+astshort": "mn20"
+  }
+ },
+ "esc5": {
+  "pair": "mn20+astw4",
+  "gain_over_hull": 1.267372589460336,
+  "cost": 7071463853056.0,
+  "best_single": "mn10",
+  "pool_cells": [
+   "bg__20db",
+   "bg__10db",
+   "bg__5db",
+   "bg__0db",
+   "pink__20db",
+   "pink__10db",
+   "pink__5db",
+   "pink__0db",
+   "white__20db",
+   "white__10db",
+   "white__5db",
+   "white__0db"
+  ],
+  "single_iv_acc": {
+   "mn10": 96.30822781262873,
+   "mn20": 95.84023500176299,
+   "astfp32": 97.30121501416173,
+   "astw4": 96.11539059781434,
+   "astshort": 95.66568611378077
+  },
+  "experts": [
+   "mn10",
+   "mn20",
+   "astfp32",
+   "astw4",
+   "astshort"
+  ],
+  "cost_table": {
+   "mn10": 34801613824.0,
+   "mn20": 90205813760.0,
+   "astfp32": 133651286970368.0,
+   "astw4": 6981258039296.0,
+   "astshort": 2812268761088.0
+  },
+  "best_single_by_combo": {
+   "mn10+mn20": "mn10",
+   "mn10+astfp32": "astfp32",
+   "mn10+astw4": "mn10",
+   "mn10+astshort": "mn10",
+   "mn20+astfp32": "astfp32",
+   "mn20+astw4": "mn10",
+   "mn20+astshort": "mn10",
+   "astfp32+astw4": "astfp32",
+   "astfp32+astshort": "astfp32",
+   "astw4+astshort": "mn10",
+   "mn10+mn20+astfp32": "astfp32",
+   "mn10+mn20+astw4": "mn10",
+   "mn10+mn20+astshort": "mn10",
+   "mn10+astfp32+astw4": "astfp32",
+   "mn10+astfp32+astshort": "astfp32",
+   "mn10+astw4+astshort": "mn10",
+   "mn20+astfp32+astw4": "astfp32",
+   "mn20+astfp32+astshort": "astfp32",
+   "mn20+astw4+astshort": "mn10",
+   "astfp32+astw4+astshort": "astfp32"
+  }
+ },
+ "urban": {
+  "pair": "mn10+astw4",
+  "gain_over_hull": 1.6088314024570671,
+  "cost": 7005400183505.912,
+  "best_single": "mn20",
+  "pool_cells": [
+   "bg__10db",
+   "bg__0db"
+  ],
+  "single_iv_acc": {
+   "mn10": 87.45843170135757,
+   "mn20": 87.64862900898876,
+   "astfp32": 88.5027959869656,
+   "astw4": 87.55416974307582,
+   "astshort": 87.22297283672654
+  },
+  "experts": [
+   "mn10",
+   "mn20",
+   "astfp32",
+   "astw4",
+   "astshort"
+  ],
+  "cost_table": {
+   "mn10": 25296165493.504353,
+   "mn20": 73472113664.0,
+   "astfp32": 133650132949084.4,
+   "astw4": 6980104018012.408,
+   "astshort": 2085697280092.4087
+  },
+  "best_single_by_combo": {
+   "mn10+mn20": "mn20",
+   "mn10+astfp32": "astfp32",
+   "mn10+astw4": "mn20",
+   "mn10+astshort": "mn20",
+   "mn20+astfp32": "astfp32",
+   "mn20+astw4": "mn20",
+   "mn20+astshort": "mn20",
+   "astfp32+astw4": "astfp32",
+   "astfp32+astshort": "astfp32",
+   "astw4+astshort": "mn20",
+   "mn10+mn20+astfp32": "astfp32",
+   "mn10+mn20+astw4": "mn20",
+   "mn10+mn20+astshort": "mn20",
+   "mn10+astfp32+astw4": "astfp32",
+   "mn10+astfp32+astshort": "astfp32",
+   "mn10+astw4+astshort": "mn20",
+   "mn20+astfp32+astw4": "astfp32",
+   "mn20+astfp32+astshort": "astfp32",
+   "mn20+astw4+astshort": "mn20",
+   "astfp32+astw4+astshort": "astfp32"
+  }
+ },
+ "tau": {
+  "pair": "mn10+astfp32",
+  "gain_over_hull": 2.8557898389709346,
+  "cost": 133723777924096.0,
+  "best_single": "astfp32",
+  "pool_cells": [
+   "shift"
+  ],
+  "single_iv_acc": {
+   "mn10": 70.28181993559495,
+   "mn20": 70.87433840789636,
+   "astfp32": 71.7956086078606,
+   "astw4": 68.92015584517999
+  },
+  "experts": [
+   "mn10",
+   "mn20",
+   "astfp32",
+   "astw4"
+  ],
+  "cost_table": {
+   "mn10": 68339043328.0,
+   "mn20": 177397021696.0,
+   "astfp32": 133655438880768.0,
+   "astw4": 6985409949696.0
+  },
+  "best_single_by_combo": {
+   "mn10+mn20": "mn20",
+   "mn10+astfp32": "astfp32",
+   "mn10+astw4": "mn20",
+   "mn20+astfp32": "astfp32",
+   "mn20+astw4": "mn20",
+   "astfp32+astw4": "astfp32",
+   "mn10+mn20+astfp32": "astfp32",
+   "mn10+mn20+astw4": "mn20",
+   "mn10+astfp32+astw4": "astfp32",
+   "mn20+astfp32+astw4": "astfp32"
+  }
+ }
+}

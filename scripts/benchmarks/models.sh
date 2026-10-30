@@ -20,7 +20,7 @@ set -e  # Exit on any error
 # 1. Path to the curious-qmoe repository root
 REPO_ROOT="/Users/cajas.sebastian/Desktop/repositories/curious-qmoe"
 
-# 2. Path to ESC-50 dataset CSV file (with EfficientNet-B0 1536-dim embeddings)
+# 2. Path to ESC-50 dataset CSV file (with EfficientNet-B3 1536-dim embeddings)
 DATASET_CSV="/Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv"
 
 # 3. Device to use for training/inference (cpu, cuda, mps)

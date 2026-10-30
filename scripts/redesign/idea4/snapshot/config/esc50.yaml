@@ -1,0 +1,98 @@
+# configs.yaml
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+hydra:
+  run:
+    dir: ./outputs/${experiment.metadata.tag}
+  output_subdir: null
+
+experiment:
+  models_to_run: [esc]
+  device: "mps"  # or "cuda", "mps", or "cpu"
+  track_emissions: false  # Set to true to enable carbon tracking (requires sudo on macOS)
+  seed: 0  # run seed: init, dropout, MC dropout, loader shuffling and the inner validation split
+  num_threads: null  # torch intra-op threads; null keeps the torch default
+  datasets:
+    esc:
+      csv: /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv
+      # label_col: which CSV column supervises training.
+      #   class_id = 5 ESC-50 super-categories (what every historical run used)
+      #   label    = the true 50 ESC-50 classes
+      label_col: class_id
+      # csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      # csv: /home/sebastian/codes/data/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
+      # imgs (mel spectrograms) is not read by benchmark.py; kept for reference only
+      # imgs: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/Mels_folds_dataset
+      normalization_type: "standard" # "l2" # or "standard", "min_max", "raw"
+
+  model:
+    hidden_sizes: [640, 320]
+    dropout_prob:  0.1953403862875243
+
+  # One training recipe for every model, singles and MoE alike (the values are
+  # the tuned single-model recipe). Early stopping, the LR scheduler and
+  # checkpoint selection all watch macro F1 on the inner validation split.
+  train:
+    optimizer: adamw
+    lr: 0.0005793146438537801
+    weight_decay: 0.0051275736171219844
+    label_smoothing: 0.10851194368924916
+    class_weighted_loss: true  # inverse class frequency weights in the cross-entropy
+    batch_size: 64
+    max_epochs: 100
+    patience: 15  # early stopping: epochs without inner-validation improvement
+    min_delta: 0.0
+    lr_factor: 0.6156433661410728  # ReduceLROnPlateau on inner-validation macro F1
+    lr_patience: 5
+    grad_clip_norm: 1.0
+
+  router:
+    expert_quantizations: [1, 2, 4, 16]
+    num_experts: 4
+    top_k: 1
+    hidden_dim: 128
+    dropout_prob: 0.2
+    load_balancing: true
+    load_balancing_alpha: 1e-3
+    diversity_loss_enabled: false  # Default to False, can be enabled in the config
+    diversity_loss_alpha: 1e-3  # New parameter for diversity loss
+    use_curiosity: false  # Enable BayesianRouter with Monte Carlo Dropout for epistemic uncertainty estimation
+    curiosity_strategy: "precision_prior"  # the published method; ablations: "kl_divergence" (polarization-only), "entropy_regularization", "precision_sharp", "escalation", "soft_escalation"
+    curiosity_alpha: 1.0  # strength of the precision prior (α in Equation 8); the published setting
+    mc_samples: 10  # Monte Carlo samples for uncertainty estimation
+    # Efficiency options (see paper appendix):
+    shared_trunk: false   # experts share one quantized trunk, only heads differ
+    trunk_bits: 8         # trunk precision when shared_trunk is on
+    gate_threshold: 0.0   # >0: run MC passes only when top-1 routing prob < this
+    # Router redesign options (redesign idea 4), all off by default; see QWave/moe.py
+    dense_experts: false          # every expert trains on every clip; expected-loss router; unscaled output
+    router_entropy_bonus: 0.0     # lambda * H(p) subtracted from the expected-loss router loss
+    error_head: false             # extra router output: P(cheapest expert misclassifies the clip)
+    uncertainty_source: mc_variance  # or error_head (MC mean of the predicted error probability)
+    escalation_rule: none         # threshold: uncertainty > tau routes to the highest-precision expert
+    escalation_tau_rule: target_share  # tau from the inner validation split: target_share or max_f1
+    escalation_target_share: 0.3
+    router_holdout: 0.0           # >0 (dense only): share of the fit split only the router trains on
+    warm_start: null      # {bit_width: checkpoint_path} to init experts from trained singles
+    # List of bit-widths for each expert
+    # expert_quantizations: [1, 1, 1, 1]
+    
+  cross_validation:
+    n_splits: 5
+    fold_column: folder  # leave-one-fold-out on the 5 official ESC-50 folds
+    shuffle: true
+    random_seed: 42  # StratifiedKFold seed, used only when fold_column is null
+    validation_split_ratio: 0.1  # inner split of the training folds, used for model selection
+
+  logging:
+    log_interval: 50
+    save_checkpoint: true
+    resume: true
+
+  metadata:
+    tag: "EfficientNet_esc50_imgs_1536"
+    notes: ""
+
+    

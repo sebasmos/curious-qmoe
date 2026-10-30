@@ -90,7 +90,7 @@ ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 
 # ─── QWave ------------------------------------------------------------------
-from QWave.datasets import EmbeddingAdaptDataset, make_outer_folds, inner_split
+from QWave.datasets import EmbeddingAdaptDataset, make_outer_folds, inner_split, recording_groups
 from QWave.graphics import plot_multiclass_roc_curve, plot_losses
 from QWave.memory import print_size_of_model, _load_cc_csv
 from QWave.utils import get_device, get_num_parameters, set_seed
@@ -210,8 +210,12 @@ cc_metrics_to_track = [
 # Bumped whenever the evaluation protocol changes, so the collector can refuse
 # to pool summaries produced under different protocols. 2 = predefined folds
 # where they exist, inner validation split for model selection, per-fold
-# seeding, macro F1 primary.
+# seeding, macro F1 primary. 3 = the same, with the inner validation split
+# grouped by source recording (cross_validation.inner_split_groups=recording),
+# so slices of one recording never sit on both sides of it.
 PROTOCOL_VERSION = 2
+PROTOCOL_VERSION_GROUPED = 3
+INNER_SPLIT_GROUPS = ("none", "recording")
 
 def checkpoint_name(model_kind: str) -> str:
     """train_moe_local writes best.pth, train_pytorch_local best_model.pth."""
@@ -264,7 +268,8 @@ def routing_fractions(experts, uncertainty, n_experts):
 def run_cv(csv_path: str, cfg: DictConfig):
     device = get_device(cfg)
     tag = cfg.experiment.metadata.tag
-    out_dir = Path("outputs") / tag
+    # experiment.output_root holds <tag>/ (null: outputs/ under the repo root)
+    out_dir = Path(cfg.experiment.get("output_root") or "outputs") / tag
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Device: {device} | Output dir: {out_dir}\n")
     print(f"DEBUG: experiment.metadata.tag is '{tag}'")
@@ -284,9 +289,11 @@ def run_cv(csv_path: str, cfg: DictConfig):
         df_full["class_id"] = df_full[label_col]
 
     labels = df_full["class_id"].values
-    df_feat = df_full.drop(columns=["folder","name","label","category"], errors="ignore")
+    df_feat = df_full.drop(columns=["folder","name","label","category","role"], errors="ignore")
     
-    if len(np.unique(labels)) < cfg.experiment.cross_validation.n_splits:
+    # The class count only constrains StratifiedKFold; predefined folds (fold_column) need no such check.
+    if (not cfg.experiment.cross_validation.get("fold_column")
+            and len(np.unique(labels)) < cfg.experiment.cross_validation.n_splits):
         print(f"[ERROR] Not enough unique classes ({len(np.unique(labels))}) for {cfg.experiment.cross_validation.n_splits} folds. Please adjust n_splits or provide more data.")
         return {}
     if len(df_feat) < cfg.experiment.cross_validation.n_splits:
@@ -294,12 +301,48 @@ def run_cv(csv_path: str, cfg: DictConfig):
         return {}
 
     cv_cfg = cfg.experiment.cross_validation
-    folds = make_outer_folds(df_full, labels, cv_cfg)
+    # T24: cross_validation.fixed_test=true. fold_column holds 0 for the official test rows and 1..K for the train
+    # folds; model k is tested on every fold-0 row, validates on the rows of fold k whose `role` is "v" (clean labels)
+    # and fits on the train rows outside fold k. The other rows of fold k are not used by model k.
+    fixed_test = bool(cv_cfg.get("fixed_test", False))
+    if fixed_test:
+        fcol = df_full[cv_cfg.fold_column].to_numpy().astype(int)
+        role = df_full["role"].astype(str).to_numpy()
+        te_fixed = np.flatnonzero(fcol == 0)
+        folds = [(k, np.flatnonzero((fcol != 0) & ((fcol != k) | (role == "v"))), te_fixed)
+                 for k in sorted(set(fcol.tolist()) - {0})]
+    else:
+        folds = make_outer_folds(df_full, labels, cv_cfg)
+    # idea 6 Stage 3c: cross_validation.only_folds=[...] runs those outer folds only (per-fold retraining on
+    # per-fold embeddings); the folds kept are computed exactly as without the option
+    only_folds = cv_cfg.get("only_folds")
+    if only_folds:
+        keep = {int(f) for f in only_folds}
+        folds = [f for f in folds if int(f[0]) in keep]
+        if not folds:
+            raise ValueError(f"cross_validation.only_folds={list(only_folds)} matches no fold")
     fold_scheme = ({"type": "predefined", "column": str(cv_cfg.fold_column)} if cv_cfg.get("fold_column")
                    else {"type": "stratified_kfold", "n_splits": int(cv_cfg.n_splits),
                          "random_state": int(cv_cfg.get("random_seed", 42))})
     inner_val_ratio = float(cv_cfg.get("validation_split_ratio", 0.1))
     seed = int(cfg.experiment.get("seed", 0))
+    # Protocol 3: group the inner split by source recording, read from the
+    # name column with cross_validation.recording_token. A dataset without
+    # recording ids (recording_token null, Quinn) keeps the stratified split.
+    split_groups = str(cv_cfg.get("inner_split_groups") or "none")
+    if split_groups not in INNER_SPLIT_GROUPS:
+        raise ValueError(f"cross_validation.inner_split_groups must be one of {INNER_SPLIT_GROUPS}, got '{split_groups}'")
+    groups, inner_split_info = None, None
+    if split_groups == "recording":
+        token = cv_cfg.get("recording_token")
+        groups = recording_groups(df_full["name"].to_numpy(), token) if token is not None else None
+        inner_split_info = {"groups": "recording", "recording_token": token, "grouped": groups is not None}
+        if groups is None:
+            print("[protocol 3] no recording ids for this dataset (cross_validation.recording_token is null): "
+                  "inner validation split falls back to stratified, ungrouped")
+        else:
+            print(f"[protocol 3] inner validation split grouped by recording: {len(np.unique(groups))} recordings")
+    protocol_version = PROTOCOL_VERSION_GROUPED if split_groups == "recording" else PROTOCOL_VERSION
     if cfg.experiment.get("num_threads"):
         torch.set_num_threads(int(cfg.experiment.num_threads))
     print(f"Folds: {fold_scheme} | seed {seed} | inner val {inner_val_ratio} | torch threads {torch.get_num_threads()}")
@@ -356,10 +399,19 @@ def run_cv(csv_path: str, cfg: DictConfig):
             # Model selection runs on an inner validation split of the
             # training folds; the held-out fold te_idx is evaluated once, at
             # the end, with the selected checkpoint.
-            fit_idx, iv_idx = inner_split(tr_idx, labels, inner_val_ratio, seed)
+            if fixed_test:
+                iv_idx, fit_idx = np.sort(tr_idx[fcol[tr_idx] == fold]), np.sort(tr_idx[fcol[tr_idx] != fold])
+            else:
+                fit_idx, iv_idx = inner_split(tr_idx, labels, inner_val_ratio, seed, groups)
+            split_record = {"fold": fold, "seed": seed, "fold_scheme": fold_scheme,
+                            "test_idx": te_idx.tolist(), "inner_val_idx": iv_idx.tolist()}
+            if fixed_test:
+                split_record["fit_idx"] = fit_idx.tolist()
+                split_record["fixed_test"] = True
+            if inner_split_info:
+                split_record["inner_split"] = inner_split_info
             with open(fold_dir / "split.json", "w") as fp:
-                json.dump({"fold": fold, "seed": seed, "fold_scheme": fold_scheme,
-                           "test_idx": te_idx.tolist(), "inner_val_idx": iv_idx.tolist()}, fp)
+                json.dump(split_record, fp)
 
             # datasets ───────────────────────────────────────────────────
             # the scaler is fit on the fit portion only, then applied to the
@@ -554,6 +606,9 @@ def run_cv(csv_path: str, cfg: DictConfig):
                 "training_flops": float(training_flops),
                 "validation_flops": float(validation_flops)
             }
+            if inner_split_info:
+                fold_result["protocol_version"] = protocol_version
+                fold_result["inner_split"] = inner_split_info
             if is_moe:
                 # held-out routing: which expert each test sample reaches
                 n_exp = eval_model.num_experts
@@ -595,7 +650,7 @@ def run_cv(csv_path: str, cfg: DictConfig):
         # collector can pair arms on (seed, fold); the means and population
         # stds here cover this run's folds only and are for a quick look.
         summary = {
-            "protocol_version": PROTOCOL_VERSION,
+            "protocol_version": protocol_version,
             "model_kind": str(model_kind),
             "seed": seed,
             "fold_scheme": fold_scheme,
@@ -624,6 +679,8 @@ def run_cv(csv_path: str, cfg: DictConfig):
         }
         if param_match:
             summary["param_match"] = param_match
+        if inner_split_info:
+            summary["inner_split"] = inner_split_info
         
         if fold_metrics and all("routing" in f for f in fold_metrics):
             summary["routing_overall_mean"] = np.mean([f["routing"]["overall"] for f in fold_metrics], axis=0).tolist()

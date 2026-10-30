@@ -10,6 +10,11 @@ from torchvision.models import efficientnet_b3
 from PIL import Image
 import clip   # ViT family
 # ----------------------------------------------------------------------
+# Official ESC-50 major categories, target // 10 (ESC-50-master/README.md).
+OFFICIAL_CATEGORY_NAMES = {0: "Animals", 1: "Natural soundscapes & water sounds",
+                           2: "Human, non-speech sounds", 3: "Interior/domestic sounds",
+                           4: "Exterior/urban noises"}
+# ----------------------------------------------------------------------
 class CustomImageDataset(Dataset):
     """
     PNG names: FOLD-CLIPID-TAKE-TARGET.png  e.g. 1-100210-A-36.png
@@ -53,6 +58,13 @@ def extract_and_save_embeddings(model, loader, device, out_dir):
     meta_df = pd.DataFrame(meta_rows, columns=["folder", "name", "label"])
 
     # 5-class mapping  -----------------------------------------------
+    # class_id is NOT the official ESC-50 grouping. It is five fixed groups of
+    # ten classes, assigned in blocks of five targets that repeat every 25
+    # (targets 0-4 and 25-29 -> "Animals", 5-9 and 30-34 -> "Natural
+    # soundscapes", and so on). Every result in this repository was trained on
+    # class_id, so the mapping stays as it is. The official grouping, where
+    # target // 10 gives the five ESC-50 major categories, is written to the
+    # separate official_category columns below.
     class_to_category = { 0:"Animals",1:"Animals",2:"Animals",3:"Animals",4:"Animals",
         5:"Natural soundscapes",6:"Natural soundscapes",7:"Natural soundscapes",
         8:"Natural soundscapes",9:"Natural soundscapes",10:"Human non-speech",
@@ -71,6 +83,14 @@ def extract_and_save_embeddings(model, loader, device, out_dir):
         49:"Exterior noises" }
     meta_df["category"] = meta_df["label"].map(class_to_category)
     meta_df["class_id"] = meta_df["category"].astype("category").cat.codes.astype(np.int8)
+
+    # Official ESC-50 major categories (ESC-50-master/README.md, targets in
+    # blocks of ten; meta/esc50.csv carries the 50 fine class names only):
+    #   0-9 animals, 10-19 natural soundscapes and water sounds, 20-29 human
+    #   non-speech sounds, 30-39 interior and domestic sounds, 40-49 exterior
+    #   and urban noises.
+    meta_df["official_category"] = (meta_df["label"] // 10).astype(np.int8)
+    meta_df["official_category_name"] = meta_df["official_category"].map(OFFICIAL_CATEGORY_NAMES)
 
     # concat so meta cols come first
     final_df = pd.concat([meta_df, emb_df], axis=1)

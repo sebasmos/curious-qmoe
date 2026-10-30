@@ -1,0 +1,417 @@
+{
+ "note": "fig-gate-by-precision-v2 (v1 with the three group headers set bold, flush left, with a thin rule above each; v1 is a copy of draft 07 Figure 4 v1, TAU title renamed): margin-gate AUROC difference to FP32, condition ALL, 95% interval over folds; every cell asserted equal to the README compact cross table",
+ "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-24_1557_gate-by-precision_code-6cbc780/paired_vs_fp32.csv",
+ "overlap_check": "OVERLAP CHECK fig-gate-by-precision-v2: 0 collisions among 40 text boxes, 40 markers, 56 lines\nlabel-column rules at rows [14.5, 7.5, 2.5]: clear of every text box (1 px pad)",
+ "asserts": "  contrast blue #137298: 5.40:1\n  contrast ochre #b9892d: 3.14:1\n  contrast lavender #9b81d2: 3.25:1\n  contrast ink2 #52514e: 7.94:1\n  contrast rule grey #858480: 3.74:1\n  font sizes in use (pt): [7.0, 7.5, 8.0]; minimum 7.0\n  page width 6.5 in, pdf.fonttype 42, white figure background, height 4.0 in",
+ "rows": [
+  {
+   "header": "AST, 1024 frames, FP32 head"
+  },
+  {
+   "label": "AST-Q8pc",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": -0.0001399989250977,
+     "lo": -0.0012068381425008,
+     "hi": 0.0009268402923053,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q8|esc"
+    },
+    "esc5": {
+     "diff": 0.0005488119818647,
+     "lo": -0.0018082780402628,
+     "hi": 0.0029059020039924,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q8|esc"
+    },
+    "urban": {
+     "diff": -0.0006442696617106,
+     "lo": -0.0020980060516891,
+     "hi": 0.0008094667282677,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q8|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "AST-Q6",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": -0.0022842623696539,
+     "lo": -0.0045858065723654,
+     "hi": 1.728183305757568e-05,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q6|esc"
+    },
+    "esc5": {
+     "diff": 0.0071636388520221,
+     "lo": 0.0050997545753099,
+     "hi": 0.0092275231287342,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q6|esc"
+    },
+    "urban": {
+     "diff": 0.0015837667765212,
+     "lo": -0.0003957529337854,
+     "hi": 0.0035632864868278,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q6|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "AST-Q5",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": 0.0001010197261528,
+     "lo": -0.0013341899508533,
+     "hi": 0.001536229403159,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q5|esc"
+    },
+    "esc5": {
+     "diff": 0.0003300858916881,
+     "lo": -0.0041529742793763,
+     "hi": 0.0048131460627526,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q5|esc"
+    },
+    "urban": {
+     "diff": 0.0016313407710605,
+     "lo": -0.0035473211557961,
+     "hi": 0.0068100026979172,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q5|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "AST-Q4 (group-wise)",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": -0.0044214919387085,
+     "lo": -0.0134548282493809,
+     "hi": 0.0046118443719637,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q4|esc"
+    },
+    "esc5": {
+     "diff": 0.0027979536023472,
+     "lo": -0.0039543146274873,
+     "hi": 0.0095502218321819,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q4|esc"
+    },
+    "urban": {
+     "diff": -0.0029808533773196,
+     "lo": -0.0124526906207897,
+     "hi": 0.0064909838661505,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q4|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "AST-Q4ch (per-channel)",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": -0.0194904599445035,
+     "lo": -0.0314787109153155,
+     "hi": -0.0075022089736914,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q4pc|esc"
+    },
+    "esc5": {
+     "diff": -0.0349953216230981,
+     "lo": -0.0495194853997627,
+     "hi": -0.0204711578464336,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q4pc|esc"
+    },
+    "urban": {
+     "diff": -0.0085387765499295,
+     "lo": -0.02397593498458,
+     "hi": 0.0068983818847209,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q4pc|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "AST-Q3",
+   "colour": "#137298",
+   "cells": {
+    "esc50": {
+     "diff": -0.0210230322337847,
+     "lo": -0.0273986688194407,
+     "hi": -0.0146473956481288,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc50|ast1024|Q3|esc"
+    },
+    "esc5": {
+     "diff": -0.0651490209178387,
+     "lo": -0.0820057438766901,
+     "hi": -0.0482922979589874,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|ast1024|Q3|esc"
+    },
+    "urban": {
+     "diff": -0.0050474042011726,
+     "lo": -0.0167840101019861,
+     "hi": 0.0066892016996407,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|ast1024|Q3|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "header": "Small CNNs, against their FP32"
+  },
+  {
+   "label": "MN10-Q8",
+   "colour": "#b9892d",
+   "cells": {
+    "esc50": {
+     "diff": -0.0020433359260588,
+     "lo": -0.0059211900067187,
+     "hi": 0.001834518154601,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|mn10|Q8sim|esc"
+    },
+    "esc5": {
+     "diff": 0.0009056254378559,
+     "lo": -0.0023869189964965,
+     "hi": 0.0041981698722083,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc5|mn10|Q8sim|esc"
+    },
+    "urban": {
+     "diff": 0.0010421126634518,
+     "lo": -0.0034620508531167,
+     "hi": 0.0055462761800204,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|mn10|Q8sim|esc"
+    },
+    "tau": {
+     "diff": 0.003536359106407,
+     "lo": -0.0140116829500291,
+     "hi": 0.0210844011628432,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "tau|mn10|Q8sim|esc"
+    }
+   }
+  },
+  {
+   "label": "MN20-Q8",
+   "colour": "#b9892d",
+   "cells": {
+    "esc50": {
+     "diff": -0.0016625498906999,
+     "lo": -0.0051833889784449,
+     "hi": 0.0018582891970449,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|mn20|Q8sim|esc"
+    },
+    "esc5": {
+     "diff": -0.0003851694818133,
+     "lo": -0.0050969698963423,
+     "hi": 0.0043266309327155,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc5|mn20|Q8sim|esc"
+    },
+    "urban": {
+     "diff": 0.0066890824539833,
+     "lo": 0.0017697616570209,
+     "hi": 0.0116084032509457,
+     "excludes_zero": true,
+     "n_folds": 10,
+     "system_id": "urban|mn20|Q8sim|esc"
+    },
+    "tau": {
+     "diff": -0.0035864014340305,
+     "lo": -0.0226247512210097,
+     "hi": 0.0154519483529485,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "tau|mn20|Q8sim|esc"
+    }
+   }
+  },
+  {
+   "label": "MN10-INT8 (retrained head)",
+   "colour": "#b9892d",
+   "cells": {
+    "esc50": {
+     "diff": -0.0080278526175709,
+     "lo": -0.020846965450842,
+     "hi": 0.0047912602157001,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|mn10|INT8|4"
+    },
+    "esc5": {
+     "diff": -0.0164360695467619,
+     "lo": -0.0306816420812966,
+     "hi": -0.0021904970122272,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|mn10|INT8|esc"
+    },
+    "urban": {
+     "diff": 0.0053390883380349,
+     "lo": -0.004265467863199,
+     "hi": 0.014943644539269,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|mn10|INT8|esc"
+    },
+    "tau": null
+   }
+  },
+  {
+   "label": "MN20-INT8 (retrained head)",
+   "colour": "#b9892d",
+   "cells": {
+    "esc50": {
+     "diff": -0.0289309389009111,
+     "lo": -0.0467784044319764,
+     "hi": -0.0110834733698458,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc50|mn20|INT8|4"
+    },
+    "esc5": {
+     "diff": -0.0366284240511057,
+     "lo": -0.0572209645761744,
+     "hi": -0.0160358835260369,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|mn20|INT8|esc"
+    },
+    "urban": null,
+    "tau": {
+     "diff": -0.023706253036033,
+     "lo": -0.0349011644379139,
+     "hi": -0.0125113416341521,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "tau|mn20|INT8|8"
+    }
+   }
+  },
+  {
+   "header": "Head, against the FP32 head"
+  },
+  {
+   "label": "BitNet head, MN10-FP32",
+   "colour": "#9b81d2",
+   "cells": {
+    "esc50": {
+     "diff": -0.0163670667859167,
+     "lo": -0.0235088279624177,
+     "hi": -0.0092253056094157,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc50|mn10|FP32|bitnet"
+    },
+    "esc5": {
+     "diff": -0.0770276475522014,
+     "lo": -0.0975160461663008,
+     "hi": -0.056539248938102,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|mn10|FP32|bitnet"
+    },
+    "urban": {
+     "diff": -0.0105766526603117,
+     "lo": -0.0251305310168871,
+     "hi": 0.0039772256962636,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|mn10|FP32|bitnet"
+    },
+    "tau": {
+     "diff": -0.0031147447746839,
+     "lo": -0.021030172841271,
+     "hi": 0.0148006832919031,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "tau|mn10|FP32|bitnet"
+    }
+   }
+  },
+  {
+   "label": "BitNet head, MN20-FP32",
+   "colour": "#9b81d2",
+   "cells": {
+    "esc50": {
+     "diff": 0.002031587126292,
+     "lo": -0.0044265238342938,
+     "hi": 0.0084896980868779,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "esc50|mn20|FP32|bitnet"
+    },
+    "esc5": {
+     "diff": -0.0314375952956575,
+     "lo": -0.0510788847643135,
+     "hi": -0.0117963058270015,
+     "excludes_zero": true,
+     "n_folds": 5,
+     "system_id": "esc5|mn20|FP32|bitnet"
+    },
+    "urban": {
+     "diff": 0.0022783124602512,
+     "lo": -0.0048872677076217,
+     "hi": 0.0094438926281242,
+     "excludes_zero": false,
+     "n_folds": 10,
+     "system_id": "urban|mn20|FP32|bitnet"
+    },
+    "tau": {
+     "diff": -0.0034187862380772,
+     "lo": -0.0208997144566729,
+     "hi": 0.0140621419805185,
+     "excludes_zero": false,
+     "n_folds": 5,
+     "system_id": "tau|mn20|FP32|bitnet"
+    }
+   }
+  }
+ ]
+}

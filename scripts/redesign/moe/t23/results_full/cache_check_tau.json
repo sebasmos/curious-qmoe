@@ -1,0 +1,12 @@
+{
+ "frozen_tail_on_cache_vs_end_to_end": {
+  "max_abs": 0.16749465465545654,
+  "mean_abs": 0.00037868632352910936,
+  "ref_mean_abs": 0.07624781876802444,
+  "rel_l2": 0.005476697348058224,
+  "rows": 14400
+ },
+ "tailq8_f1_s0_vs_p1_max_abs": 0.0,
+ "tailq8_f1_s1_vs_p1_max_abs": 0.0,
+ "tailq8_f1_s2_vs_p1_max_abs": 0.0
+}

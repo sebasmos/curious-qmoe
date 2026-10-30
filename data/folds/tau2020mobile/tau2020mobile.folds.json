@@ -1,0 +1,192 @@
+{
+ "n": 23035,
+ "n_a": 14400,
+ "scenes": [
+  "airport",
+  "bus",
+  "metro",
+  "metro_station",
+  "park",
+  "public_square",
+  "shopping_mall",
+  "street_pedestrian",
+  "street_traffic",
+  "tram"
+ ],
+ "n_folds": 5,
+ "seed": 0,
+ "locations": 514,
+ "fold_counts_by_device": {
+  "1": {
+   "a": 2914,
+   "b": 189,
+   "c": 218,
+   "s1": 218,
+   "s2": 218,
+   "s3": 218,
+   "s4": 209,
+   "s5": 225,
+   "s6": 208
+  },
+  "2": {
+   "a": 2903,
+   "b": 233,
+   "c": 239,
+   "s1": 233,
+   "s2": 226,
+   "s3": 249,
+   "s4": 227,
+   "s5": 223,
+   "s6": 232
+  },
+  "3": {
+   "a": 2878,
+   "b": 211,
+   "c": 231,
+   "s1": 228,
+   "s2": 228,
+   "s3": 202,
+   "s4": 225,
+   "s5": 224,
+   "s6": 228
+  },
+  "4": {
+   "a": 2961,
+   "b": 232,
+   "c": 196,
+   "s1": 215,
+   "s2": 197,
+   "s3": 199,
+   "s4": 213,
+   "s5": 204,
+   "s6": 202
+  },
+  "5": {
+   "a": 2744,
+   "b": 213,
+   "c": 193,
+   "s1": 186,
+   "s2": 211,
+   "s3": 212,
+   "s4": 206,
+   "s5": 204,
+   "s6": 210
+  }
+ },
+ "fold_counts_by_scene_a": {
+  "1": {
+   "airport": 338,
+   "bus": 210,
+   "metro": 316,
+   "metro_station": 222,
+   "park": 315,
+   "public_square": 400,
+   "shopping_mall": 207,
+   "street_pedestrian": 393,
+   "street_traffic": 276,
+   "tram": 237
+  },
+  "2": {
+   "airport": 332,
+   "bus": 235,
+   "metro": 405,
+   "metro_station": 360,
+   "park": 245,
+   "public_square": 252,
+   "shopping_mall": 347,
+   "street_pedestrian": 151,
+   "street_traffic": 309,
+   "tram": 267
+  },
+  "3": {
+   "airport": 273,
+   "bus": 418,
+   "metro": 251,
+   "metro_station": 254,
+   "park": 144,
+   "public_square": 276,
+   "shopping_mall": 328,
+   "street_pedestrian": 322,
+   "street_traffic": 309,
+   "tram": 303
+  },
+  "4": {
+   "airport": 287,
+   "bus": 280,
+   "metro": 200,
+   "metro_station": 336,
+   "park": 360,
+   "public_square": 290,
+   "shopping_mall": 288,
+   "street_pedestrian": 347,
+   "street_traffic": 329,
+   "tram": 244
+  },
+  "5": {
+   "airport": 210,
+   "bus": 297,
+   "metro": 268,
+   "metro_station": 268,
+   "park": 376,
+   "public_square": 222,
+   "shopping_mall": 270,
+   "street_pedestrian": 227,
+   "street_traffic": 217,
+   "tram": 389
+  }
+ },
+ "fold_locations": {
+  "1": 100,
+  "2": 103,
+  "3": 104,
+  "4": 104,
+  "5": 103
+ },
+ "official": {
+  "a": {
+   "none": 3855,
+   "test": 330,
+   "train": 10215
+  },
+  "b": {
+   "none": 0,
+   "test": 329,
+   "train": 749
+  },
+  "c": {
+   "none": 0,
+   "test": 329,
+   "train": 748
+  },
+  "s1": {
+   "none": 0,
+   "test": 330,
+   "train": 750
+  },
+  "s2": {
+   "none": 0,
+   "test": 330,
+   "train": 750
+  },
+  "s3": {
+   "none": 0,
+   "test": 330,
+   "train": 750
+  },
+  "s4": {
+   "none": 750,
+   "test": 330,
+   "train": 0
+  },
+  "s5": {
+   "none": 750,
+   "test": 330,
+   "train": 0
+  },
+  "s6": {
+   "none": 750,
+   "test": 330,
+   "train": 0
+  }
+ }
+}

@@ -1,0 +1,6 @@
+{
+ "rule": "within 10 points of MN10-Q8 on clean inner validation (fold 1) on two of three tasks, and phi with MN10-Q8 below the AST-Q4's on those tasks",
+ "tasks_passing": [],
+ "n_tasks_scored": 3,
+ "P1_pass": false
+}

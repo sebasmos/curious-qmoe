@@ -1,0 +1,124 @@
+{
+ "figure": "fig-humility, escalation rate of MN10-Q8 at a fixed clean threshold against noise level",
+ "panels": {
+  "a": {
+   "title": "ESC-50 (50 classes)",
+   "tier": "MN10-Q8, FP32 head, 30% budget",
+   "snrs": [
+    20,
+    10,
+    5,
+    0
+   ],
+   "rows": {
+    "clean": 0.3203,
+    "bg__20db": 0.486,
+    "bg__10db": 0.6447999999999999,
+    "bg__5db": 0.7438,
+    "bg__0db": 0.8177,
+    "pink__20db": 0.4056999999999999,
+    "pink__10db": 0.5629000000000001,
+    "pink__5db": 0.6861,
+    "pink__0db": 0.8204,
+    "white__20db": 0.4937999999999999,
+    "white__10db": 0.687,
+    "white__5db": 0.8019000000000001,
+    "white__0db": 0.8997999999999999
+   },
+   "field": null,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-25_1406_moe-t3t5_code-81a3d6a/tables/t5_rate_by_cell_q30.csv (task == esc50, system == cheap)",
+   "threshold": "30th percentile of the margin on clean inner validation, per seed and fold",
+   "cross_check": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-25_1406_moe-t3t5_code-81a3d6a/README.md section (c), 13 rates equal to 3 decimals"
+  },
+  "b": {
+   "title": "UrbanSound8K",
+   "tier": "MN10-Q8, FP32 head, 30% budget",
+   "snrs": [
+    20,
+    10,
+    5,
+    0
+   ],
+   "rows": {
+    "clean": 0.301115850015933,
+    "bg__20db": 0.351236564445187,
+    "bg__10db": 0.4481776752686679,
+    "bg__5db": 0.5294843216235128,
+    "bg__0db": 0.613365351589113,
+    "pink__20db": 0.3205882977523486,
+    "pink__10db": 0.3782261440941108,
+    "pink__5db": 0.4377084401871388,
+    "pink__0db": 0.5280641749712691,
+    "white__20db": 0.3451622906999331,
+    "white__10db": 0.4356093560169856,
+    "white__5db": 0.5228258114520719,
+    "white__0db": 0.6506232847017739
+   },
+   "field": null,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-25_1406_moe-t3t5_code-81a3d6a/tables/t5_rate_by_cell_q30.csv (task == urban, system == cheap)",
+   "threshold": "30th percentile of the margin on clean inner validation, per seed and fold",
+   "cross_check": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-25_1406_moe-t3t5_code-81a3d6a/README.md section (c), 13 rates equal to 3 decimals"
+  },
+  "c": {
+   "title": "FSDKaggle2018",
+   "tier": "MN10-Q8, FP32 head, 20% budget",
+   "snrs": [
+    10,
+    0
+   ],
+   "rows": {
+    "clean": 0.1977401129943502,
+    "bg__10db": 0.6743879472693033,
+    "bg__0db": 0.7630885122410547,
+    "pink__10db": 0.6289642184557438,
+    "pink__0db": 0.8179284369114878,
+    "white__10db": 0.6974764595103577,
+    "white__0db": 0.8840677966101695
+   },
+   "field": 0.4717514124293784,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d1/primary_by_condition.csv (column rate)",
+   "threshold": "clean inner-validation budget, chosen before the test data",
+   "cross_check": [
+    "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d1/humility.csv (every step rises in 5 of 5 folds)",
+    "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT/audit_by_condition.csv"
+   ]
+  },
+  "d": {
+   "title": "FSD50K",
+   "tier": "MN10-Q8, FP32 head, 30% budget",
+   "snrs": [
+    10,
+    0
+   ],
+   "rows": {
+    "clean": 0.2944329967738349,
+    "bg__10db": 0.528704399784988,
+    "bg__0db": 0.6233085923068243,
+    "pink__10db": 0.4885382612009649,
+    "pink__0db": 0.6454024210750327,
+    "white__10db": 0.5549668377505432,
+    "white__0db": 0.6758812240927703
+   },
+   "field": 0.4445652221907316,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d2/primary_by_condition.csv (column rate)",
+   "threshold": "clean inner-validation budget, chosen before the test data",
+   "cross_check": [
+    "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d2/humility.csv (every step rises in 5 of 5 folds)",
+    "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT-D2/audit_by_condition.csv"
+   ]
+  }
+ },
+ "x_offsets_category_widths": {
+  "bg": -0.08,
+  "pink": 0.0,
+  "white": 0.08
+ },
+ "not_drawn": [
+  "field mix for ESC-50 and UrbanSound8K: not in t5_rate_by_cell_q30.csv",
+  "20 and 5 dB for FSDKaggle2018 and FSD50K: T21 scored 10 and 0 dB only",
+  "draft 07 panel (d), unseen classes and the other dataset: run with MN20-Q8 on ESC-50, not the version 08 cheap expert",
+  "TAU Urban Acoustic Scenes 2020 Mobile: T5 has device shift, not noise severity (rates in the same table)"
+ ],
+ "overlap_check": "OVERLAP CHECK fig-humility: 0 collisions among 74 text boxes, 42 markers, 20 lines, 4 legends",
+ "asserts": "  contrast ink #1a1a19: 17.42:1\n  contrast ink2 #52514e: 7.94:1\n  contrast reference grey #858480: 3.74:1\n  contrast background blue #137298: 5.40:1\n  contrast pink ochre #b9892d: 3.14:1\n  contrast white lavender #9b81d2: 3.25:1\n  font sizes in use (pt): [7.0, 7.5, 8.0]; minimum 7.0\n  page width 6.5 in, pdf.fonttype 42, white figure background, height 4.45 in"
+}

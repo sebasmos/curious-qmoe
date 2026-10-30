@@ -1,0 +1,68 @@
+{
+ "esc50": {
+  "pair": "mn10+astw4",
+  "cheap": "mn10",
+  "strong": "astw4",
+  "pair_cost": 7016089144320.0,
+  "pool_cells": [
+   "bg__20db",
+   "bg__10db",
+   "bg__5db",
+   "bg__0db",
+   "pink__20db",
+   "pink__10db",
+   "pink__5db",
+   "pink__0db",
+   "white__20db",
+   "white__10db",
+   "white__5db",
+   "white__0db"
+  ],
+  "candidates_inner_val_acc": {
+   "mn10": 76.47756897102055,
+   "mn20": 79.46236384907728,
+   "astw4": 80.92087185408504,
+   "astshort": 80.61093462757981
+  },
+  "best_single": "astw4",
+  "best_single_cost": 6981272784896.0,
+  "note": "inner validation of the shifted pool cells"
+ },
+ "urban": {
+  "pair": "mn10+astw4",
+  "cheap": "mn10",
+  "strong": "astw4",
+  "pair_cost": 7005400183505.912,
+  "pool_cells": [
+   "bg__10db",
+   "bg__0db"
+  ],
+  "candidates_inner_val_acc": {
+   "mn10": 71.96457020090044,
+   "mn20": 73.50871258745548,
+   "astw4": 74.21646313173832,
+   "astshort": 73.9887551086314
+  },
+  "best_single": "astw4",
+  "best_single_cost": 6980104018012.408,
+  "note": "inner validation of the shifted pool cells"
+ },
+ "tau": {
+  "pair": "mn10+astfp32",
+  "cheap": "mn10",
+  "strong": "astfp32",
+  "pair_cost": 133723777924096.0,
+  "pool_cells": [
+   "clean"
+  ],
+  "candidates_inner_val_acc": {
+   "mn10": 70.28181993559495,
+   "mn20": 70.87433840789635,
+   "astfp32": 71.79560860786061,
+   "astw4": 68.92015584517999
+  },
+  "best_single": "astfp32",
+  "best_single_cost": 133655438880768.0,
+  "note": "TAU: clean inner validation (device A only), the shifted family has no inner validation"
+ }
+}

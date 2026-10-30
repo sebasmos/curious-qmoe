@@ -9,10 +9,12 @@ Uses held-out samples only: each fold's test samples are routed by that
 fold's own checkpoint, with features scaled by the scaler fitted on the
 fold's fit portion, and the folds are pooled.
 
-Usage:
+Usage (what scripts/reproduce_paper.sh --analysis runs, for alpha 0.3 and 1.0):
     python scripts/analysis/routing_analysis.py --run-dir outputs/esc_pprior_a1.0_s0/moe \
-        --output-dir scripts/analysis/outputs-paper/routing
+        --output-dir scripts/analysis/outputs-paper/routing_a1.0
     python scripts/analysis/routing_analysis.py --synthetic
+The run directory is a scripts/benchmark.py output (config.yaml, fold_*/split.json
+and checkpoints), under outputs/ in the repo or in an archived results folder.
 """
 
 from __future__ import annotations

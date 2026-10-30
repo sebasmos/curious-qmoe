@@ -1,0 +1,54 @@
+{
+ "dataset": "FSDnoisy18k",
+ "train_rows_dropped_shared_with_test": [
+  "393581.wav",
+  "414515.wav",
+  "417524.wav"
+ ],
+ "classes": [
+  "Acoustic_guitar",
+  "Bass_guitar",
+  "Clapping",
+  "Coin_(dropping)",
+  "Crash_cymbal",
+  "Dishes_and_pots_and_pans",
+  "Engine",
+  "Fart",
+  "Fire",
+  "Fireworks",
+  "Glass",
+  "Hi-hat",
+  "Piano",
+  "Rain",
+  "Slam",
+  "Squeak",
+  "Tearing",
+  "Walk_or_footsteps",
+  "Wind",
+  "Writing"
+ ],
+ "n_classes": 20,
+ "n_train": 17582,
+ "n_train_verified": 1772,
+ "n_test": 947,
+ "n_eval_rows": 2719,
+ "freesound_id_parsed": 18529,
+ "train_with_uploader": 6929,
+ "n_groups_train": 12455,
+ "fold_sizes": [
+  3482,
+  2894,
+  3562,
+  3862,
+  3782
+ ],
+ "verified_fold_sizes": [
+  299,
+  231,
+  381,
+  479,
+  382
+ ],
+ "verified_per_class_per_fold_min": 0,
+ "test_per_class_min": 30
+}

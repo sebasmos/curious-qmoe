@@ -43,6 +43,9 @@ def plot_multiclass_roc_curve(all_labels, all_probs, EXPERIMENT_NAME="."):
     all_probs = np.array(all_probs)
     label_binarizer = LabelBinarizer()
     y_onehot = label_binarizer.fit_transform(all_labels)
+    if y_onehot.shape[1] > 1 and all_probs.shape[1] > y_onehot.shape[1]:
+        # a class absent from this test fold (T21 D2): keep the probability columns of the classes present
+        all_probs = all_probs[:, label_binarizer.classes_.astype(int)]
     if y_onehot.shape[1] == 1:
         y_onehot = np.hstack((1 - y_onehot, y_onehot))
         all_probs = np.array(all_probs)

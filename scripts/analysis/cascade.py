@@ -57,6 +57,8 @@ from torch.utils.data import DataLoader, TensorDataset
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from QWave.costs import cost, moe_cost, weight_bytes  # noqa: E402
+
 SINGLES = {"q4": "4", "q8": "8", "fp32": "esc"}
 MOE_ARMS = {"uniform": "{ds}_uniform_ctrl", "pprior": "{ds}_pprior_a1.0",
             "st_uniform": "{ds}_sharedtrunk_uniform_ctrl", "st_pprior": "{ds}_sharedtrunk_a1.0"}
@@ -154,36 +156,6 @@ def load_model(run_dir: Path, fold: int, in_dim: int, n_cls: int):
     return model.eval(), cfg
 
 
-def layer_cost(m) -> np.ndarray | None:
-    """[MACs, bit operations] of one linear layer per sample, else None."""
-    from QWave.qmoe_layers import BitLinear
-
-    if isinstance(m, BitLinear):
-        nb = m.num_bits
-        w, a = (2, 2) if nb == "bitnet" else (nb, 8 if nb < 16 else 32)
-    elif isinstance(m, nn.Linear):
-        w, a = 32, 32
-    else:
-        return None
-    macs = m.in_features * m.out_features
-    return np.array([macs, macs * w * a], dtype=float)
-
-
-def cost(module) -> np.ndarray:
-    return sum((c for c in map(layer_cost, module.modules()) if c is not None), np.zeros(2))
-
-
-def moe_cost(model, shares) -> np.ndarray:
-    """Expected per-sample cost of an MoE: every router pass (M MC passes plus
-    the logits pass for a Bayesian router), the shared trunk if any, and each
-    expert weighted by its routing share."""
-    passes = model.router.mc_samples + 1 if model.use_curiosity else 1
-    c = passes * cost(model.router)
-    if model.shared is not None:
-        return c + cost(model.shared.trunk) + sum(s * cost(h) for s, h in zip(shares, model.shared.heads))
-    return c + sum(s * cost(e) for s, e in zip(shares, model.experts))
-
-
 @torch.no_grad()
 def softmax(model, X) -> np.ndarray:
     return F.softmax(model(X), dim=1).numpy()
@@ -225,8 +197,6 @@ def macro_f1(y, pred) -> float:
 # ── one dataset and seed ───────────────────────────────────────────────────
 
 def run_seed(ds: str, seed: int, runs: dict, passes: int, cache: dict) -> dict:
-    from QWave.memory import storage_bits
-
     dirs = {name: runs[(f"{ds}_singles", seed, kind)] for name, kind in SINGLES.items()}
     moe_dirs = {arm: runs[(tag.format(ds=ds), seed, "moe")] for arm, tag in MOE_ARMS.items()
                 if (tag.format(ds=ds), seed, "moe") in runs}
@@ -249,7 +219,7 @@ def run_seed(ds: str, seed: int, runs: dict, passes: int, cache: dict) -> dict:
         (X_iv, y_iv), (X_te, y_te) = rows["inner_val"], rows["test"]
         models = {name: load_model(d, fold, in_dim, n_cls)[0] for name, d in dirs.items()}
         costs = {name: cost(m) for name, m in models.items()}
-        storage = {name: storage_bits(m) / 8 for name, m in models.items()}
+        storage = {name: weight_bytes(m) for name, m in models.items()}
         out["costs"] = {name: {"macs": costs[name][0], "bops": costs[name][1], "storage_bytes": storage[name]}
                         for name in models}
 

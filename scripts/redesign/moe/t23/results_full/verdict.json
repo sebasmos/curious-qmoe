@@ -1,0 +1,240 @@
+{
+ "family": 19,
+ "beds": {
+  "esc50": "field",
+  "urban": "field",
+  "tau": "shift"
+ },
+ "budgets_chosen": {
+  "esc50": {
+   "a": "0.05",
+   "b": "(0.3, 0.1)",
+   "two_tier_own": "0.2"
+  },
+  "urban": {
+   "a": "0.1",
+   "b": "(0.3, 0.2)",
+   "two_tier_own": "0.2"
+  },
+  "tau": {
+   "a": "0.3",
+   "b": "(0.5, 0.3)",
+   "two_tier_own": "0.3"
+  }
+ },
+ "H1": {
+  "sys_a": {
+   "tasks_pass": [],
+   "pass": false
+  },
+  "sys_b": {
+   "tasks_pass": [],
+   "pass": false
+  }
+ },
+ "H2": {
+  "sys_a": {
+   "tasks_pass": [],
+   "pass": false
+  },
+  "sys_b": {
+   "tasks_pass": [],
+   "pass": false
+  }
+ },
+ "H3": {
+  "esc50": {
+   "steps": 39,
+   "exceptions": [],
+   "holds": true,
+   "rates": {
+    "rate_a": {
+     "bg__0db": 0.4122,
+     "bg__10db": 0.237,
+     "bg__20db": 0.1388,
+     "bg__5db": 0.3135,
+     "clean": 0.0705,
+     "clip_p10": 0.2275,
+     "clip_p25": 0.1058,
+     "clip_p50": 0.0773,
+     "field": 0.194,
+     "lowpass_1000hz": 0.517,
+     "lowpass_2000hz": 0.2432,
+     "lowpass_4000hz": 0.0975,
+     "pink__0db": 0.4072,
+     "pink__10db": 0.1815,
+     "pink__20db": 0.093,
+     "pink__5db": 0.2745,
+     "reverb_rt1200ms": 0.289,
+     "reverb_rt300ms": 0.1942,
+     "reverb_rt600ms": 0.2327,
+     "white__0db": 0.49,
+     "white__10db": 0.279,
+     "white__20db": 0.1402,
+     "white__5db": 0.3865
+    },
+    "rate_b2": {
+     "bg__0db": 0.8163,
+     "bg__10db": 0.6453,
+     "bg__20db": 0.4887,
+     "bg__5db": 0.7425,
+     "clean": 0.3148,
+     "clip_p10": 0.5748,
+     "clip_p25": 0.4043,
+     "clip_p50": 0.3292,
+     "field": 0.5338,
+     "lowpass_1000hz": 0.8813,
+     "lowpass_2000hz": 0.616,
+     "lowpass_4000hz": 0.3932,
+     "pink__0db": 0.8183,
+     "pink__10db": 0.5633,
+     "pink__20db": 0.4038,
+     "pink__5db": 0.6862,
+     "reverb_rt1200ms": 0.6733,
+     "reverb_rt300ms": 0.5337,
+     "reverb_rt600ms": 0.5947,
+     "white__0db": 0.9007,
+     "white__10db": 0.6857,
+     "white__20db": 0.4937,
+     "white__5db": 0.7988
+    },
+    "rate_b3": {
+     "bg__0db": 0.566,
+     "bg__10db": 0.33,
+     "bg__20db": 0.203,
+     "bg__5db": 0.4458,
+     "clean": 0.1172,
+     "clip_p10": 0.329,
+     "clip_p25": 0.1743,
+     "clip_p50": 0.1252,
+     "field": 0.2897,
+     "lowpass_1000hz": 0.73,
+     "lowpass_2000hz": 0.3952,
+     "lowpass_4000hz": 0.17,
+     "pink__0db": 0.5577,
+     "pink__10db": 0.2682,
+     "pink__20db": 0.1483,
+     "pink__5db": 0.3868,
+     "reverb_rt1200ms": 0.3948,
+     "reverb_rt300ms": 0.2615,
+     "reverb_rt600ms": 0.3183,
+     "white__0db": 0.6483,
+     "white__10db": 0.3985,
+     "white__20db": 0.2073,
+     "white__5db": 0.538
+    }
+   }
+  },
+  "urban": {
+   "steps": 39,
+   "exceptions": [],
+   "holds": true,
+   "rates": {
+    "rate_a": {
+     "bg__0db": 0.2753,
+     "bg__10db": 0.1795,
+     "bg__20db": 0.1301,
+     "bg__5db": 0.224,
+     "clean": 0.1023,
+     "clip_p10": 0.199,
+     "clip_p25": 0.1351,
+     "clip_p50": 0.108,
+     "field": 0.1496,
+     "lowpass_1000hz": 0.334,
+     "lowpass_2000hz": 0.1759,
+     "lowpass_4000hz": 0.125,
+     "pink__0db": 0.1948,
+     "pink__10db": 0.1399,
+     "pink__20db": 0.1108,
+     "pink__5db": 0.1633,
+     "reverb_rt1200ms": 0.1425,
+     "reverb_rt300ms": 0.1369,
+     "reverb_rt600ms": 0.1417,
+     "white__0db": 0.2678,
+     "white__10db": 0.1664,
+     "white__20db": 0.1192,
+     "white__5db": 0.1956
+    },
+    "rate_b2": {
+     "bg__0db": 0.6127,
+     "bg__10db": 0.4476,
+     "bg__20db": 0.351,
+     "bg__5db": 0.529,
+     "clean": 0.3006,
+     "clip_p10": 0.4931,
+     "clip_p25": 0.3667,
+     "clip_p50": 0.3097,
+     "field": 0.4012,
+     "lowpass_1000hz": 0.6696,
+     "lowpass_2000hz": 0.4385,
+     "lowpass_4000hz": 0.3374,
+     "pink__0db": 0.5272,
+     "pink__10db": 0.3778,
+     "pink__20db": 0.3203,
+     "pink__5db": 0.4372,
+     "reverb_rt1200ms": 0.3773,
+     "reverb_rt300ms": 0.3757,
+     "reverb_rt600ms": 0.3776,
+     "white__0db": 0.6501,
+     "white__10db": 0.4348,
+     "white__20db": 0.3446,
+     "white__5db": 0.522
+    },
+    "rate_b3": {
+     "bg__0db": 0.4612,
+     "bg__10db": 0.3096,
+     "bg__20db": 0.2384,
+     "bg__5db": 0.3792,
+     "clean": 0.2035,
+     "clip_p10": 0.3677,
+     "clip_p25": 0.252,
+     "clip_p50": 0.2093,
+     "field": 0.2773,
+     "lowpass_1000hz": 0.5633,
+     "lowpass_2000hz": 0.341,
+     "lowpass_4000hz": 0.2238,
+     "pink__0db": 0.3398,
+     "pink__10db": 0.243,
+     "pink__20db": 0.2093,
+     "pink__5db": 0.2829,
+     "reverb_rt1200ms": 0.2566,
+     "reverb_rt300ms": 0.2488,
+     "reverb_rt600ms": 0.2538,
+     "white__0db": 0.486,
+     "white__10db": 0.2971,
+     "white__20db": 0.2179,
+     "white__5db": 0.3712
+    }
+   }
+  },
+  "tau": {
+   "steps": 3,
+   "exceptions": [],
+   "holds": true,
+   "rates": {
+    "rate_a": {
+     "clean": 0.3097,
+     "shift": 0.4314
+    },
+    "rate_b2": {
+     "clean": 0.5034,
+     "shift": 0.6574
+    },
+    "rate_b3": {
+     "clean": 0.3152,
+     "shift": 0.4411
+    }
+   }
+  }
+ },
+ "H1_pass": false,
+ "H2_pass": false,
+ "H3_holds_all_tasks": true,
+ "stop_fires": true,
+ "rules": {
+  "H1": "a system beats the equal-cost hull and the best single by 1.0 point on two of three tasks, majority of folds, Nadeau-Bengio, Holm over 3 tasks x 2 systems",
+  "H2": "the same system beats the equal-cost two-tier MN10-Q8 to AST-Q4 cascade by 0.5 points on two of three tasks (majority of folds)",
+  "H3": "escalation rises with shift at every noise step; field and TAU shift above clean",
+  "Stop": "neither system more than 0.5 points above the two-tier cascade on any task"
+ }
+}

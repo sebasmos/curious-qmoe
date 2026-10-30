@@ -1,0 +1,12 @@
+--task esc50 --configs w8a8 n4a4 n4a6 w4a6 w4a4 w8a6 w8a4 w6a6 w4a8 n4a8 mp6 mp8 --conditions clean --field
+--task esc50 --configs CHEAPsr1 CHEAPsr2 --conditions clean --field
+--task esc50 --configs CHEAP --conditions bg:20 bg:10 bg:5 bg:0 pink:20 pink:10 pink:5 pink:0 white:20 white:10 white:5 white:0
+--task urban --configs w8a8 n4a4 n4a6 w4a6 w4a4 w8a6 w8a4 w6a6 w4a8 n4a8 mp6 mp8 --conditions clean --field
+--task urban --configs CHEAPsr1 CHEAPsr2 --conditions clean --field
+--task urban --configs CHEAP --conditions bg:20 bg:10 bg:5 bg:0 pink:20 pink:10 pink:5 pink:0 white:20 white:10 white:5 white:0
+--task tau --configs w8a8 n4a4 n4a6 w4a6 w4a4 w8a6 w8a4 w6a6 w4a8 n4a8 mp6 mp8 --conditions clean
+--task tau --configs CHEAPsr1 CHEAPsr2 --conditions clean
+--task esc50 --configs w8a8 --conditions bg:20 bg:10 bg:5 bg:0 pink:20 pink:10 pink:5 pink:0 white:20 white:10 white:5 white:0
+--task urban --configs w8a8 --conditions bg:20 bg:10 bg:5 bg:0 pink:20 pink:10 pink:5 pink:0 white:20 white:10 white:5 white:0
+--task esc50 --configs CHEAP --conditions reverb:0.3 reverb:0.6 reverb:1.2 clip:0.5 clip:0.25 clip:0.1 lowpass:4000 lowpass:2000 lowpass:1000
+--task urban --configs CHEAP --conditions reverb:0.3 reverb:0.6 reverb:1.2 clip:0.5 clip:0.25 clip:0.1 lowpass:4000 lowpass:2000 lowpass:1000

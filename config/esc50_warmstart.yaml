@@ -16,7 +16,8 @@ experiment:
     esc:
       csv: /Users/cajas.sebastian/Documents/DATASETS/ESC-50/efficientnet_1536/esc-50.csv
       # label_col: which CSV column supervises training.
-      #   class_id = 5 ESC-50 super-categories (what every historical run used)
+      #   class_id = 5 fixed groups of 10 ESC-50 classes (what every historical run used);
+      #              NOT the official ESC-50 major categories, see data/esc/esc-50-data_processing.py
       #   label    = the true 50 ESC-50 classes
       label_col: class_id
       # csv: /Users/sebasmos/Documents/DATASETS/data_VE/ESC-50-master/VE_soundscapes/efficientnet_1536/esc-50.csv
@@ -65,9 +66,12 @@ experiment:
     trunk_bits: 8         # trunk precision when shared_trunk is on
     gate_threshold: 0.0   # >0: run MC passes only when top-1 routing prob < this
     warm_start:
-      bitnet: "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/bitnet/fold_{fold}/best_model.pth"
-      "4": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/4/fold_{fold}/best_model.pth"
-      "8": "/Users/cajas.sebastian/Desktop/repositories/curious-qmoe/RESULTS-paper/ESC Results/models_all_final/8/fold_{fold}/best_model.pth"
+      # Per-bit-width single-model checkpoints trained with the current protocol
+      # (scripts/reproduce_paper.sh --list, tag esc_singles_s<seed>); {fold} is
+      # filled per fold. Point these at your own run of that job list.
+      bitnet: "outputs/esc_singles_s0/bitnet/fold_{fold}/best_model.pth"
+      "4": "outputs/esc_singles_s0/4/fold_{fold}/best_model.pth"
+      "8": "outputs/esc_singles_s0/8/fold_{fold}/best_model.pth"
     # List of bit-widths for each expert
     # expert_quantizations: [1, 1, 1, 1]
     

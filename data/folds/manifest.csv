@@ -1,0 +1,10 @@
+source (run folder),source md5,file,md5,rows,columns
+csv/d1/pool.csv,5c4e0802cd3409623518de7fb0ea8bc4,fsdkaggle2018/pool.csv,5c4e0802cd3409623518de7fb0ea8bc4,5310,"folder, name, label, category, class_id, official, manually_verified, freesound_id, license"
+csv/d1/extra.csv,a8dce71b502c75e26407637300615605,fsdkaggle2018/extra.csv,a8dce71b502c75e26407637300615605,5763,"folder, name, label, category, class_id, official, manually_verified, freesound_id, license"
+csv/d2/pool.csv,1c4010c4db36e1cea1b0d2c12d67afd0,fsd50k/pool.csv,239920fa1e9d216fd0c861eb0f6e5350,26272,"folder, name, label, category, class_id, head_name, uploader, license"
+csv/d2/extra.csv,a872e95dc42fa41c4a8b343bfe8ad754,fsd50k/extra.csv,5deb43eed8947e7f9c65e3db38fa94cf,4396,"folder, name, label, category, class_id, head_name, uploader, license"
+csv/d3/all.csv,b52c5498ad3cb0febf07c15e729f7b78,fsdnoisy18k/all.csv,f43abc96beb0d67fcefe952259ee8507,18529,"folder, name, label, category, class_id, role, group, freesound_id, manually_verified, part, src"
+csv/d3/eval.csv,08e1a2e5d918cce7765a317896030dbf,fsdnoisy18k/eval.csv,ad66626dc7910ff01208284668a4f73b,2719,"folder, name, label, category, class_id, role, group, freesound_id, manually_verified, part, src"
+csv/d4/all.csv,6d7aa11a91b81c2066c8945addcdd807,tut2017/all.csv,6d7aa11a91b81c2066c8945addcdd807,6300,"folder, name, label, category, class_id, role, group, freesound_id, manually_verified, part, src"
+csv/d4/eval.csv,6d7aa11a91b81c2066c8945addcdd807,tut2017/eval.csv,6d7aa11a91b81c2066c8945addcdd807,6300,"folder, name, label, category, class_id, role, group, freesound_id, manually_verified, part, src"
+TAU2020Mobile/ast_768/tau2020mobile.csv,632c84e2d7a32a3c5d825414ffc1db87,tau2020mobile/tau2020mobile.csv,632c84e2d7a32a3c5d825414ffc1db87,23035,"folder, name, label, category, class_id, device, city, location, segment, official"

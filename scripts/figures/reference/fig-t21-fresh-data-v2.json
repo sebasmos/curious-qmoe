@@ -1,0 +1,390 @@
+{
+ "figure": "fig-t21-fresh-data-v2",
+ "units": {
+  "cost": "priced bit-operations per clip (plotted in T = 1e12)",
+  "f1": "macro F1, %"
+ },
+ "panel_a_fsdkaggle2018_field": {
+  "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d1/primary_by_condition.csv",
+  "row": "cond == field",
+  "budget": "b20",
+  "mn": {
+   "f1": 72.49521410845097,
+   "cost": 30648876244.128063
+  },
+  "ast": {
+   "f1": 75.0701524482612,
+   "cost": 2604740839403.173
+  },
+  "avg": {
+   "f1": 77.74483107538695,
+   "cost": 2635389715647.301
+  },
+  "cascade": {
+   "f1": 77.57266660512855,
+   "cost": 1153625807344.071,
+   "rate": 0.4717514124293784
+  },
+  "hull": {
+   "pair": "mn|avg|0.4311",
+   "lambda": 0.4311,
+   "f1_at_cascade_cost": 74.74210748964101,
+   "f1_linear_at_cascade_cost": 74.75847142057985,
+   "note": "The line is the linear time-sharing segment between MN10-Q8 and always-average. The table's hull_f1 (the expected macro F1 of the random mixture) is used for the stem end and the gain; it differs from the line at the cascade's cost by 0.016 points."
+  },
+  "d_hull": 2.830559115487531,
+  "nb_ci95": [
+   1.7779861719768963,
+   3.883132058998166
+  ],
+  "p_nb": 0.0017198244228798,
+  "folds_pos": 5,
+  "n_folds": 5,
+  "n_seeds": 5,
+  "random_gate_f1_not_plotted": 74.942159745931,
+  "precondition_ast_minus_mn": 2.5749383398102155
+ },
+ "panel_a_widened_hull_t25": {
+  "sources": {
+   "verdict": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/verdict.json",
+   "statics": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/t25_statics_by_condition.csv",
+   "by_condition": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/t25_by_condition.csv"
+  },
+  "row": "cond == field (FSDKaggle2018)",
+  "mn10_mn20_average": {
+   "f1": 77.01193790134444,
+   "cost": 109951794416.28323,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/t25_statics_by_condition.csv (system mn10+mn20), equal to /Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/verdict.json best_pair.field pair_f1 / pair_cost",
+   "d_cascade_minus_pair": 0.560728703784103,
+   "nb_ci95": [
+    -1.6963925854296926,
+    2.817849992997899
+   ],
+   "p_nb": 0.528286026396726,
+   "folds_positive": 4
+  },
+  "widened_statics_field": {
+   "ast": {
+    "f1": 75.0701524482612,
+    "cost": 2604740839403.173
+   },
+   "avg": {
+    "f1": 77.74483107538695,
+    "cost": 2635389715647.301
+   },
+   "dymn04": {
+    "f1": 69.1478387408192,
+    "cost": 16422201063.605274
+   },
+   "mn04": {
+    "f1": 68.17958223759723,
+    "cost": 15178790390.936348
+   },
+   "mn04+dymn04": {
+    "f1": 72.14624571783749,
+    "cost": 31600991454.541622
+   },
+   "mn04+mn05": {
+    "f1": 72.28701599780635,
+    "cost": 32303251524.652355
+   },
+   "mn04+mn10": {
+    "f1": 73.7329257485118,
+    "cost": 45827666635.06441
+   },
+   "mn04+mn20": {
+    "f1": 75.25742317950768,
+    "cost": 94481708563.09152
+   },
+   "mn05": {
+    "f1": 69.50329255624169,
+    "cost": 17124461133.71601
+   },
+   "mn05+dymn04": {
+    "f1": 72.91797064629691,
+    "cost": 33546662197.32128
+   },
+   "mn05+mn10": {
+    "f1": 74.21997532964687,
+    "cost": 47773337377.84406
+   },
+   "mn05+mn20": {
+    "f1": 75.82946134433719,
+    "cost": 96427379305.8712
+   },
+   "mn10": {
+    "f1": 72.49521410845098,
+    "cost": 30648876244.128063
+   },
+   "mn10+dymn04": {
+    "f1": 74.08720086618163,
+    "cost": 47071077307.73333
+   },
+   "mn10+mn20": {
+    "f1": 77.01193790134444,
+    "cost": 109951794416.28323
+   },
+   "mn20": {
+    "f1": 74.80213032644703,
+    "cost": 79302918172.15518
+   },
+   "mn20+dymn04": {
+    "f1": 75.51831105876201,
+    "cost": 95725119235.76044
+   }
+  },
+  "envelope_vertices": [
+   {
+    "system": "mn04",
+    "cost": 15178790390.936348,
+    "f1": 68.17958223759723
+   },
+   {
+    "system": "dymn04",
+    "cost": 16422201063.605274,
+    "f1": 69.1478387408192
+   },
+   {
+    "system": "mn05",
+    "cost": 17124461133.71601,
+    "f1": 69.50329255624169
+   },
+   {
+    "system": "mn10",
+    "cost": 30648876244.128063,
+    "f1": 72.49521410845098
+   },
+   {
+    "system": "mn05+dymn04",
+    "cost": 33546662197.32128,
+    "f1": 72.91797064629691
+   },
+   {
+    "system": "mn05+mn10",
+    "cost": 47773337377.84406,
+    "f1": 74.21997532964687
+   },
+   {
+    "system": "mn10+mn20",
+    "cost": 109951794416.28323,
+    "f1": 77.01193790134444
+   },
+   {
+    "system": "avg",
+    "cost": 2635389715647.301,
+    "f1": 77.74483107538695
+   }
+  ],
+  "drawn_from": "mn10",
+  "not_drawn_note": "envelope vertices mn04, dymn04 and mn05 (0.015 to 0.017 T, F1 68.2 to 69.5) lie left of the panel's x range (from 0.018 T) and below its y range; the dashed line starts at MN10-Q8, which is on the envelope",
+  "segment_at_cascade_cost": {
+   "lo": "mn10+mn20",
+   "hi": "avg",
+   "lambda_table": 0.4132645685541349,
+   "lambda_recomputed": 0.4132645685541349,
+   "hull_f1_table_expected": 77.30495008501103,
+   "hull_f1_linear": 77.3148166827114,
+   "note": "the line is the linear time-sharing envelope; the gain uses the table's hull_f1 (expected macro F1 of the mixture), 0.010 points below the line"
+  },
+  "d_wide": 0.26771652011752,
+  "nb_ci95": [
+   -1.0838852806700443,
+   1.6193183209050843
+  ],
+  "p_nb": 0.6116239329865563,
+  "boot_ci95": [
+   -0.11594605492422877,
+   0.6390472512325679
+  ],
+  "folds_positive": 3,
+  "n_folds": 5,
+  "fold_d": "[1.247, -0.049, 0.145, 0.663, -0.668]",
+  "cascade": {
+   "f1": 77.57266660512855,
+   "cost": 1153625807344.071,
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-28_2247_moe-t25_code-cc3b048/tables/d1/verdict.json H1_wide"
+  }
+ },
+ "changes_from_v1": [
+  "(a) adds the MN10-Q8 + MN20-Q8 average (hexagon, ochre) and the widened hull (dashed grey, envelope from MN10-Q8 through mn05+dymn04, mn05+mn10 and mn10+mn20 to always-average; the two middle vertices carry no marker)",
+  "(a) annotations: '+2.83 over two-expert hull' and '+0.27 over widened hull'",
+  "(a) y upper limit 78.5 to 79.0 so the second annotation fits inside the panel",
+  "legend: 4 columns (was 3), 'equal-cost hull' renamed 'two-expert hull', two entries added; (b) and (c) unchanged"
+ ],
+ "panel_b_fsd50k_field_descriptive": {
+  "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d2/primary_by_condition.csv",
+  "row": "cond == field",
+  "budget": "b30",
+  "mn": {
+   "f1": 45.23823816622015,
+   "cost": 33860072238.188023
+  },
+  "ast": {
+   "f1": 46.49927013623613,
+   "cost": 2962571061216.1924
+  },
+  "avg": {
+   "f1": 49.65922983400143,
+   "cost": 2996431133454.3804
+  },
+  "cascade": {
+   "f1": 48.93893707726467,
+   "cost": 1175203781607.1384,
+   "rate": 0.4445652221907316
+  },
+  "hull": {
+   "pair": "mn|avg|0.3853",
+   "lambda": 0.3853,
+   "f1_at_cascade_cost": 46.90246840310316,
+   "f1_linear_at_cascade_cost": 46.94144491634728,
+   "note": "The line is the linear time-sharing segment between MN10-Q8 and always-average. The table's hull_f1 (the expected macro F1 of the random mixture) is used for the stem end and the gain; it differs from the line at the cascade's cost by 0.039 points."
+  },
+  "d_hull": 2.036468674161528,
+  "nb_ci95": [
+   1.640212882713321,
+   2.432724465609735
+  ],
+  "p_nb": 0.0001401193940084,
+  "folds_pos": 5,
+  "n_folds": 5,
+  "n_seeds": 3,
+  "random_gate_f1_not_plotted": 47.140884116961345,
+  "precondition_ast_minus_mn": 1.2610319700159898
+ },
+ "panel_c_budget_choice": {
+  "fsdkaggle2018": {
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d1/primary_budget_selection.csv",
+   "bed": "clean inner validation",
+   "budget_pct": [
+    5,
+    10,
+    20,
+    30,
+    50
+   ],
+   "gain_iv": [
+    1.4679787577329129,
+    2.0976514704927895,
+    2.3784091045457534,
+    2.1990069022877146,
+    1.591037736097234
+   ],
+   "chosen": "b20",
+   "audit_source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT/audit_budget_selection.csv",
+   "audit_gain": [
+    1.4694277573355663,
+    2.090063641857384,
+    2.3741127490468017,
+    2.1930208041336243,
+    1.6032940668631142
+   ],
+   "audit_chosen": "b20"
+  },
+  "fsd50k": {
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e/tables/d2/primary_budget_selection.csv",
+   "bed": "clean inner validation",
+   "budget_pct": [
+    5,
+    10,
+    20,
+    30,
+    50
+   ],
+   "gain_iv": [
+    0.697355281168055,
+    1.381191593365816,
+    2.1445292663113125,
+    2.5098643964805323,
+    2.0622479050765308
+   ],
+   "chosen": "b30",
+   "audit_source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT-D2/audit_budget_selection.csv",
+   "audit_gain": [
+    0.6991139618253372,
+    1.378895885146325,
+    2.1378180952362658,
+    2.495261296287088,
+    2.089012598907858
+   ],
+   "audit_chosen": "b30"
+  }
+ },
+ "audit_cross_check": {
+  "d1": {
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT/audit_by_condition.csv",
+   "rows": {
+    "mn": {
+     "t21": 72.49521410845097,
+     "audit": 72.49521410845097
+    },
+    "ast": {
+     "t21": 75.0701524482612,
+     "audit": 75.0701524482612
+    },
+    "avg": {
+     "t21": 77.74483107538695,
+     "audit": 77.74483107538695
+    },
+    "cascade": {
+     "t21": 77.57266660512855,
+     "audit": 77.57266660512855
+    },
+    "rate": {
+     "t21": 0.4717514124293784,
+     "audit": 0.4717514124293784
+    },
+    "cascade_cost": {
+     "t21": 1153625807344.071,
+     "audit": 1169221014324.743,
+     "note": "differs because the auditor counts MN10 cost about 1.31x higher; the hull is MN10-Q8 to always-average, so the gain does not depend on MN10's cost (D1 audit, section 3)"
+    },
+    "d_hull": {
+     "t21": 2.830559115487531,
+     "audit_linear_hull": 2.814046255682032
+    }
+   }
+  },
+  "d2": {
+   "source": "/Users/cajas.sebastian/Documents/qmoe-results/2026-10-26_1408_moe-t21_code-731570e-AUDIT-D2/audit_by_condition.csv",
+   "rows": {
+    "mn": {
+     "t21": 45.23823816622015,
+     "audit": 45.23823816622015
+    },
+    "ast": {
+     "t21": 46.49927013623613,
+     "audit": 46.49927013623613
+    },
+    "avg": {
+     "t21": 49.65922983400143,
+     "audit": 49.65922983400143
+    },
+    "cascade": {
+     "t21": 48.93893707726467,
+     "audit": 48.93893707726467
+    },
+    "rate": {
+     "t21": 0.4445652221907316,
+     "audit": 0.4445823645580926
+    },
+    "cascade_cost": {
+     "t21": 1175203781607.1384,
+     "audit": 1198302200294.567,
+     "note": "differs because the auditor counts MN10 cost about 1.31x higher; the hull is MN10-Q8 to always-average, so the gain does not depend on MN10's cost (D1 audit, section 3)"
+    },
+    "d_hull": {
+     "t21": 2.036468674161528,
+     "audit_linear_hull": 1.9972304186926564
+    }
+   }
+  }
+ },
+ "always_average_cost": "mn_cost + ast_cost from primary_by_condition.csv, asserted equal to the 'avg' cost in primary_by_seed_fold.csv",
+ "not_drawn": [
+  "a test-set (field mix) budget sweep for FSDKaggle2018: the T21 tables hold the chosen budget only",
+  "the FSD50K test-set sweep in AUDIT-D2/audit_every_budget_test.csv has no cost column and is an audit file",
+  "the random gate at the cascade's rate (field F1 in random_gate_f1_not_plotted)"
+ ],
+ "overlap_check": "OVERLAP CHECK fig-t21-fresh-data-v2: 0 collisions among 60 text boxes, 21 markers, 10 lines",
+ "asserts": "  contrast ink #1a1a19: 17.42:1\n  contrast ink2 #52514e: 7.94:1\n  contrast hull/reference grey #858480: 3.74:1\n  contrast MN10-Q8 ochre #b9892d: 3.14:1\n  contrast AST-Q4 blue #137298: 5.40:1\n  contrast cascade dark lavender #6140a0: 7.64:1\n  font sizes in use (pt): [7.0, 7.5, 8.0]; minimum 7.0\n  page width 6.5 in, pdf.fonttype 42, white figure background, height 2.75 in"
+}
